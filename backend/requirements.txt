@@ -1,0 +1,11 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.23
+cryptography==41.0.7
+pycryptodome==3.19.0
+pqcrypto==0.1.0
+kyber-py==1.2.0
+dilithium-py==1.4.0
+python-dotenv==1.0.0
+Werkzeug==3.0.1

@@ -1,0 +1,294 @@
+# API Documentation
+
+## Base URL
+```
+http://localhost:5000/api
+```
+
+## Authentication Endpoints
+
+### POST /auth/register
+Register a new user account.
+
+**Request Body:**
+```json
+{
+  "username": "user@example.com",
+  "masterPassword": "SecurePassword123!"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "salt": "base64_encoded_salt",
+  "username": "user@example.com"
+}
+```
+
+**Error Response (409 Conflict):**
+```json
+{
+  "success": false,
+  "error": "Username already exists"
+}
+```
+
+---
+
+### POST /auth/login
+Authenticate user and retrieve salt for vault key derivation.
+
+**Request Body:**
+```json
+{
+  "username": "user@example.com",
+  "masterPassword": "SecurePassword123!"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "salt": "base64_encoded_salt",
+  "username": "user@example.com"
+}
+```
+
+**Error Response (401 Unauthorized):**
+```json
+{
+  "success": false,
+  "error": "Invalid username or password"
+}
+```
+
+---
+
+### POST /auth/check-username
+Check if a username is available.
+
+**Request Body:**
+```json
+{
+  "username": "user@example.com"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "available": true
+}
+```
+
+---
+
+### POST /auth/get-salt
+Get salt for a username (used after page refresh).
+
+**Request Body:**
+```json
+{
+  "username": "user@example.com"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "salt": "base64_encoded_salt"
+}
+```
+
+---
+
+## Password Management Endpoints
+
+### POST /passwords/add
+Add or update an encrypted password entry.
+
+**Request Body:**
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "siteUrl": "google.com",
+  "siteUsername": "user@gmail.com",
+  "encryptedPassword": "base64_encrypted_password",
+  "iv": "base64_initialization_vector",
+  "authTag": "base64_auth_tag"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "message": "Password saved successfully",
+  "passwordId": "660e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (200 OK) - When updating existing:**
+```json
+{
+  "success": true,
+  "message": "Password updated successfully",
+  "passwordId": "660e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+---
+
+### POST /passwords/get-all
+Retrieve all encrypted passwords for a user.
+
+**Request Body:**
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "passwords": [
+    {
+      "passwordId": "660e8400-e29b-41d4-a716-446655440000",
+      "siteUrl": "google.com",
+      "siteUsername": "user@gmail.com",
+      "encryptedPassword": "base64_encrypted_password",
+      "iv": "base64_initialization_vector",
+      "authTag": "base64_auth_tag",
+      "createdAt": "2024-01-01T00:00:00",
+      "updatedAt": "2024-01-01T00:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### POST /passwords/delete
+Delete a password entry.
+
+**Request Body:**
+```json
+{
+  "passwordId": "660e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Password deleted successfully"
+}
+```
+
+---
+
+### POST /passwords/get-crypto-view
+Get encrypted data view for transparency demonstration.
+
+**Request Body:**
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "cryptoData": {
+    "username": "user@example.com",
+    "userId": "550e8400-e29b-41d4-a716-446655440000",
+    "salt": "base64_salt",
+    "masterPasswordHash": "base64_hash",
+    "note": "This is the server-side view. Notice that passwords are encrypted.",
+    "passwords": [
+      {
+        "siteUrl": "google.com",
+        "siteUsername": "user@gmail.com",
+        "encryptedPassword": "base64_encrypted_password_truncated...",
+        "iv": "base64_iv",
+        "authTag": "base64_auth_tag",
+        "note": "Server stores only encrypted ciphertext - cannot decrypt without vault key"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Health Check
+
+### GET /api/health
+Check if the API is running.
+
+**Response (200 OK):**
+```json
+{
+  "status": "healthy",
+  "service": "PQC Password Manager",
+  "version": "1.0.0"
+}
+```
+
+---
+
+## Security Notes
+
+### Zero-Knowledge Architecture
+- Master password is **never** sent in plain text after initial registration/login
+- Vault key is derived client-side using PBKDF2 with 600,000 iterations
+- All password encryption/decryption happens in the browser
+- Server only stores encrypted ciphertext and authentication metadata
+
+### Encryption Details
+- **Algorithm:** AES-256-CBC (simulating GCM for this demo)
+- **Key Derivation:** PBKDF2-HMAC-SHA256
+- **Iterations:** 600,000
+- **Salt:** Unique per user, 256 bits
+- **IV:** Unique per password, 96 bits
+
+### Post-Quantum Cryptography
+- **Key Encapsulation:** ML-KEM (Kyber) - simulated in this demo
+- **Digital Signatures:** ML-DSA (Dilithium) - simulated in this demo
+- In production, use actual PQC libraries like liboqs or pqcrypto
+
+---
+
+## Error Codes
+
+| Status Code | Meaning |
+|------------|---------|
+| 200 | Success |
+| 201 | Created |
+| 400 | Bad Request - Missing or invalid parameters |
+| 401 | Unauthorized - Invalid credentials |
+| 404 | Not Found - Resource doesn't exist |
+| 409 | Conflict - Resource already exists |
+| 500 | Internal Server Error |
+
+---
+
+## Rate Limiting
+
+Currently not implemented. For production:
+- Implement rate limiting on authentication endpoints
+- Add CAPTCHA for repeated failed login attempts
+- Implement account lockout after multiple failures
