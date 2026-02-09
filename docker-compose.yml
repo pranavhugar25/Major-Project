@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: pqc-backend
+    volumes:
+      - ./backend:/app/backend
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development
+    working_dir: /app/backend
+    # Skip venv creation and pip install since dependencies are already in the image
+    command: python app.py
+    networks:
+      - pqc-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    container_name: pqc-frontend
+    volumes:
+      - ./frontend:/app/frontend
+      - node_modules:/app/frontend/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+    working_dir: /app/frontend
+    command: npm start
+    depends_on:
+      - backend
+    networks:
+      - pqc-network
+
+  # Production service using nginx + backend
+  production:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: pqc-production
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - pqc-network
+
+networks:
+  pqc-network:
+    driver: bridge
+
+volumes:
+  backend_venv:
+  node_modules:
