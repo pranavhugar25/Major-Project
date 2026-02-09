@@ -1,11 +1,33 @@
+# Flask and Extensions
 Flask==3.0.0
-Flask-CORS==4.0.0
+Flask-CORS==6.0.0
 Flask-SQLAlchemy==3.1.1
+Flask-Limiter==3.5.0
+Flask-WTF==1.2.1
+
+# Database
 SQLAlchemy==2.0.23
-cryptography==41.0.7
+
+# Cryptography
+cryptography==44.0.1
 pycryptodome==3.19.0
-pqcrypto==0.1.0
-kyber-py==1.2.0
-dilithium-py==1.4.0
+
+# Post-Quantum Cryptography (liboqs)
+liboqs-python==0.14.1
+
+# Authentication
+PyJWT==2.8.0
+
+# Configuration
 python-dotenv==1.0.0
-Werkzeug==3.0.1
+
+# Security Headers
+flask-talisman==1.0.0
+
+# Utilities
+Werkzeug==3.1.5
+
+# Testing
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-mock==3.14.0

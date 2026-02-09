@@ -212,6 +212,15 @@
   font-size: 1.25rem;
 }
 
+.attempt-counter {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-warning);
+  padding: var(--spacing-sm);
+  background: rgba(255, 214, 0, 0.1);
+  border-radius: var(--radius-md);
+}
+
 .auth-button {
   width: 100%;
   padding: 1rem;

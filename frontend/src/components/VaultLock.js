@@ -11,14 +11,14 @@ function VaultLock({ user, onUnlock, onLogout }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleUnlock = (e) => {
+  const handleUnlock = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
       // Derive vault key from master password and stored salt
-      const vaultKey = deriveVaultKey(masterPassword, user.salt);
+      const vaultKey = await deriveVaultKey(masterPassword, user.salt);
       
       // Pass vault key to parent component
       onUnlock(vaultKey);

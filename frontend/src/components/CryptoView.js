@@ -18,13 +18,15 @@ function CryptoView({ user }) {
   const fetchCryptoView = async () => {
     try {
       const response = await passwordAPI.getCryptoView(user.userId);
+      console.log('CryptoView - response:', response);
       
       if (response.success) {
-        setCryptoData(response.cryptoData);
+        setCryptoData(response);
       } else {
         setError(response.error || 'Failed to fetch crypto view');
       }
     } catch (err) {
+      console.error('CryptoView - error:', err);
       setError('Failed to load crypto view');
     } finally {
       setLoading(false);

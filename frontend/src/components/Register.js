@@ -15,9 +15,9 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   const [error, setError] = useState('');
   const [passwordStrength, setPasswordStrength] = useState(null);
 
-  const handlePasswordChange = (value) => {
+  const handlePasswordChange = async (value) => {
     setMasterPassword(value);
-    const strength = calculatePasswordStrength(value);
+    const strength = await calculatePasswordStrength(value);
     setPasswordStrength(strength);
   };
 
@@ -44,7 +44,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
 
       if (response.success) {
         // Derive vault key client-side
-        const vaultKey = deriveVaultKey(masterPassword, response.salt);
+        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
 
         // Pass user data and vault key to parent
         onRegisterSuccess({

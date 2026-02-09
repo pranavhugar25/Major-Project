@@ -34,8 +34,20 @@ function AddPassword({ user, vaultKey }) {
     setLoading(true);
 
     try {
+      // Validate URL format
+      const urlPattern = /^https?:\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+$/;
+      if (siteUrl && !urlPattern.test(siteUrl)) {
+        setError('Please enter a valid URL format');
+        setLoading(false);
+        return;
+      }
+      
       // Encrypt password client-side
-      const { encryptedPassword, iv, authTag } = encryptPassword(password, vaultKey);
+      console.log('AddPassword - vaultKey:', vaultKey ? 'present' : 'missing');
+      console.log('AddPassword - password:', password ? 'present' : 'missing');
+      console.log('AddPassword - salt:', user.salt ? 'present' : 'missing');
+      const { encryptedPassword, iv, authTag } = await encryptPassword(password, vaultKey);
+      console.log('AddPassword - encrypted:', { encryptedPassword: !!encryptedPassword, ivLength: iv?.length, authTag: authTag });
 
       // Send encrypted data to server
       const response = await passwordAPI.addPassword({

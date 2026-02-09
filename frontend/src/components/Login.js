@@ -12,6 +12,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
   const [masterPassword, setMasterPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,8 +24,15 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
       const response = await authAPI.login(username, masterPassword);
 
       if (response.success) {
+        setFailedAttempts(0);
+        
+        // Debug logging
+        console.log('Login - salt received:', response.salt ? 'present' : 'missing');
+        console.log('Login - salt length:', response.salt?.length);
+        
         // Derive vault key client-side
-        const vaultKey = deriveVaultKey(masterPassword, response.salt);
+        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
+        console.log('Login - vaultKey derived:', vaultKey ? 'present' : 'missing');
 
         // Pass user data and vault key to parent
         onLoginSuccess({
@@ -33,10 +41,12 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
           salt: response.salt
         }, vaultKey);
       } else {
-        setError(response.error || 'Login failed');
+        setFailedAttempts(prev => prev + 1);
+        setError('Invalid username or password');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      setFailedAttempts(prev => prev + 1);
+      setError('Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -82,6 +92,12 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
             <div className="error-message">
               <span className="error-icon">⚠️</span>
               {error}
+            </div>
+          )}
+
+          {failedAttempts > 0 && (
+            <div className="attempt-counter">
+              Failed attempts: {failedAttempts}
             </div>
           )}
 

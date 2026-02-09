@@ -1,10 +1,14 @@
 /**
  * API service for communicating with the backend
- * All requests go through PQC secure channel
+ * JWT-based authentication with automatic token management
  */
 import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+// Token storage keys
+const ACCESS_TOKEN_KEY = 'pqc_access_token';
+const REFRESH_TOKEN_KEY = 'pqc_refresh_token';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -15,10 +19,15 @@ const api = axios.create({
   timeout: 10000
 });
 
-// Request interceptor for adding auth tokens (future enhancement)
+// ============================================
+// Request Interceptor - Add JWT Token
+// ============================================
 api.interceptors.request.use(
   (config) => {
-    // Future: Add JWT token or session ID here
+    const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => {
@@ -26,35 +35,146 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+// ============================================
+// Response Interceptor - Handle Auth Errors
+// ============================================
 api.interceptors.response.use(
   (response) => {
     return response;
   },
-  (error) => {
-    if (error.response) {
-      // Server responded with error status
-      console.error('API Error:', error.response.data);
-    } else if (error.request) {
-      // Request made but no response
-      console.error('Network Error:', error.request);
-    } else {
-      // Something else happened
-      console.error('Error:', error.message);
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // Handle 401 errors - attempt token refresh
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      if (refreshToken) {
+        try {
+          // Attempt to refresh the access token
+          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken
+          });
+          
+          if (response.data.success) {
+            // Store new tokens
+            setAuthTokens(response.data);
+            
+            // Retry original request with new token
+            originalRequest.headers.Authorization = `Bearer ${response.data.access_token}`;
+            return api(originalRequest);
+          }
+        } catch (refreshError) {
+          // Refresh failed - clear tokens and redirect to login
+          clearAuthTokens();
+          redirectToLogin();
+          return Promise.reject(refreshError);
+        }
+      } else {
+        // No refresh token - redirect to login
+        clearAuthTokens();
+        redirectToLogin();
+      }
     }
+    
     return Promise.reject(error);
   }
 );
 
+// ============================================
+// Token Management Functions
+// ============================================
+
 /**
- * Authentication APIs
+ * Store authentication tokens
+ * @param {object} tokenData - Object containing access_token, refresh_token, expires_in
  */
+export const setAuthTokens = (tokenData) => {
+  if (tokenData.access_token) {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, tokenData.access_token);
+  }
+  if (tokenData.refresh_token) {
+    sessionStorage.setItem(REFRESH_TOKEN_KEY, tokenData.refresh_token);
+  }
+};
+
+/**
+ * Clear authentication tokens
+ */
+export const clearAuthTokens = () => {
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+};
+
+/**
+ * Get access token
+ * @returns {string|null}
+ */
+export const getAccessToken = () => {
+  return sessionStorage.getItem(ACCESS_TOKEN_KEY);
+};
+
+/**
+ * Check if user is authenticated
+ * @returns {boolean}
+ */
+export const isAuthenticated = () => {
+  return !!getAccessToken();
+};
+
+/**
+ * Redirect to login page
+ */
+const redirectToLogin = () => {
+  // Clear any cached user data
+  sessionStorage.removeItem('pqc_user');
+  
+  // Redirect if in browser
+  if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+    window.location.href = '/login';
+  }
+};
+
+/**
+ * Handle successful login
+ * @param {object} loginData - Response data from login API
+ */
+export const handleLoginSuccess = (loginData) => {
+  // Store tokens
+  setAuthTokens({
+    access_token: loginData.access_token,
+    refresh_token: loginData.refresh_token,
+    expires_in: loginData.expires_in
+  });
+  
+  // Store minimal user data (not the vault key!)
+  const userData = {
+    userId: loginData.userId,
+    username: loginData.username,
+    salt: loginData.salt
+  };
+  sessionStorage.setItem('pqc_user', JSON.stringify(userData));
+};
+
+/**
+ * Handle logout
+ */
+export const handleLogout = () => {
+  clearAuthTokens();
+  sessionStorage.removeItem('pqc_user');
+  redirectToLogin();
+};
+
+// ============================================
+// Authentication APIs
+// ============================================
 export const authAPI = {
   /**
    * Register a new user
    * @param {string} username - Username
    * @param {string} masterPassword - Master password
-   * @returns {Promise} Response with userId and salt
+   * @returns {Promise<object>} Response with userId and salt
    */
   register: async (username, masterPassword) => {
     const response = await api.post('/auth/register', {
@@ -65,52 +185,86 @@ export const authAPI = {
   },
 
   /**
-   * Login user
+   * Login user - returns JWT tokens
    * @param {string} username - Username
    * @param {string} masterPassword - Master password
-   * @returns {Promise} Response with userId and salt
+   * @returns {Promise<object>} Response with tokens, userId, and salt
    */
   login: async (username, masterPassword) => {
     const response = await api.post('/auth/login', {
       username,
       masterPassword
     });
+    
+    if (response.data.success) {
+      handleLoginSuccess(response.data);
+    }
+    
     return response.data;
+  },
+
+  /**
+   * Refresh access token
+   * @param {string} refreshToken - Refresh token
+   * @returns {Promise<object>} New access token
+   */
+  refresh: async (refreshToken) => {
+    const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+      refresh_token: refreshToken
+    });
+    return response.data;
+  },
+
+  /**
+   * Verify if current token is valid
+   * @returns {Promise<object>} Token validity status
+   */
+  verify: async () => {
+    const response = await api.get('/auth/verify');
+    return response.data;
+  },
+
+  /**
+   * Logout user
+   * @returns {Promise<object>} Logout status
+   */
+  logout: async () => {
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      handleLogout();
+    }
   },
 
   /**
    * Check if username is available
    * @param {string} username - Username to check
-   * @returns {Promise} Response with availability status
+   * @returns {Promise<object>} Availability status
    */
   checkUsername: async (username) => {
-    const response = await api.post('/auth/check-username', {
-      username
-    });
+    const response = await api.post('/auth/check-username', { username });
     return response.data;
   },
 
   /**
    * Get salt for a username
    * @param {string} username - Username
-   * @returns {Promise} Response with salt
+   * @returns {Promise<object>} Salt data
    */
   getSalt: async (username) => {
-    const response = await api.post('/auth/get-salt', {
-      username
-    });
+    const response = await api.post('/auth/get-salt', { username });
     return response.data;
   }
 };
 
-/**
- * Password Management APIs
- */
+// ============================================
+// Password Management APIs
+// ============================================
 export const passwordAPI = {
   /**
    * Add or update encrypted password
    * @param {object} passwordData - Encrypted password data
-   * @returns {Promise} Response with success status
+   * @returns {Promise<object>} Success status
    */
   addPassword: async (passwordData) => {
     const response = await api.post('/passwords/add', passwordData);
@@ -118,45 +272,37 @@ export const passwordAPI = {
   },
 
   /**
-   * Get all passwords for a user
-   * @param {string} userId - User ID
-   * @returns {Promise} Response with array of encrypted passwords
+   * Get all passwords for authenticated user
+   * @returns {Promise<object>} Array of encrypted passwords
    */
-  getAllPasswords: async (userId) => {
-    const response = await api.post('/passwords/get-all', {
-      userId
-    });
+  getAllPasswords: async () => {
+    const response = await api.post('/passwords/get-all', {});
     return response.data;
   },
 
   /**
    * Delete a password
    * @param {string} passwordId - Password ID to delete
-   * @returns {Promise} Response with success status
+   * @returns {Promise<object>} Success status
    */
   deletePassword: async (passwordId) => {
-    const response = await api.post('/passwords/delete', {
-      passwordId
-    });
+    const response = await api.post('/passwords/delete', { passwordId });
     return response.data;
   },
 
   /**
    * Get crypto view (for transparency)
-   * @param {string} userId - User ID
-   * @returns {Promise} Response with encrypted data view
+   * @returns {Promise<object>} Encrypted data view
    */
-  getCryptoView: async (userId) => {
-    const response = await api.post('/passwords/get-crypto-view', {
-      userId
-    });
+  getCryptoView: async () => {
+    const response = await api.post('/passwords/get-crypto-view', {});
     return response.data;
   }
 };
 
-/**
- * Health check
- */
+// ============================================
+// Health Check
+// ============================================
 export const healthCheck = async () => {
   const response = await api.get('/health');
   return response.data;

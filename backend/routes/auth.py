@@ -1,11 +1,23 @@
 """
 Authentication routes for user registration and login
 Zero-knowledge architecture: master password never stored in plain text
+
+JWT-based session management for secure API authentication.
 """
 from flask import Blueprint, request, jsonify
 from models.database import db, User
 from utils.crypto import generate_salt, hash_password, verify_password
+from utils.auth import JWTAuth, require_auth, generate_session_token, add_to_blacklist
 import uuid
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+# Failed login tracking for brute force protection
+failed_login_attempts = {}
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION = 300  # 5 minutes in seconds
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -48,12 +60,32 @@ def register():
                 'error': 'Username and master password are required'
             }), 400
         
+        # Enhanced password strength validation
+        if len(master_password) < 12:
+            return jsonify({
+                'success': False,
+                'error': 'Password must be at least 12 characters'
+            }), 400
+        
+        # Check for complexity requirements
+        has_uppercase = any(c.isupper() for c in master_password)
+        has_lowercase = any(c.islower() for c in master_password)
+        has_digit = any(c.isdigit() for c in master_password)
+        has_special = any(not c.isalnum() for c in master_password)
+        
+        if not (has_uppercase and has_lowercase and has_digit and has_special):
+            return jsonify({
+                'success': False,
+                'error': 'Password must contain uppercase, lowercase, numbers, and special characters'
+            }), 400
+        
         # Check if user already exists
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
+            # Generic error message to prevent user enumeration
             return jsonify({
                 'success': False,
-                'error': 'Username already exists'
+                'error': 'An account with this email already exists'
             }), 409
         
         # Generate unique salt for this user
@@ -73,6 +105,8 @@ def register():
         db.session.add(new_user)
         db.session.commit()
         
+        logger.info(f"New user registered: {username}")
+        
         return jsonify({
             'success': True,
             'message': 'User registered successfully',
@@ -83,16 +117,17 @@ def register():
         
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Registration failed: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Registration failed: {str(e)}'
+            'error': 'Registration failed. Please try again.'
         }), 500
 
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
     """
-    Authenticate user and return salt for vault key derivation
+    Authenticate user and return JWT tokens
     
     Request body:
         {
@@ -106,7 +141,11 @@ def login():
             "message": "Login successful",
             "userId": "uuid",
             "salt": "base64_salt",
-            "username": "user@example.com"
+            "username": "user@example.com",
+            "access_token": "jwt_token",
+            "refresh_token": "jwt_refresh_token",
+            "token_type": "Bearer",
+            "expires_in": 900
         }
     """
     try:
@@ -128,9 +167,27 @@ def login():
                 'error': 'Username and master password are required'
             }), 400
         
+        # Check for brute force lockout
+        client_ip = request.remote_addr
+        current_time = time.time()
+        
+        if username in failed_login_attempts:
+            attempts, lockout_time = failed_login_attempts[username]
+            if current_time < lockout_time:
+                remaining_time = int(lockout_time - current_time)
+                return jsonify({
+                    'success': False,
+                    'error': 'Account temporarily locked due to too many failed attempts',
+                    'retry_after': remaining_time
+                }), 429
+            else:
+                # Lockout expired, reset counter
+                del failed_login_attempts[username]
+        
         # Find user
         user = User.query.filter_by(username=username).first()
         if not user:
+            logger.warning(f"Login attempt for non-existent user: {username}")
             return jsonify({
                 'success': False,
                 'error': 'Invalid username or password'
@@ -138,105 +195,138 @@ def login():
         
         # Verify password
         if not verify_password(master_password, user.salt, user.master_password_hash):
+            # Track failed attempt
+            failed_login_attempts[username] = (failed_login_attempts.get(username, (0, 0))[0] + 1, current_time + LOCKOUT_DURATION)
+            
+            # Calculate remaining attempts
+            remaining_attempts = MAX_FAILED_ATTEMPTS - failed_login_attempts[username][0]
+            
+            logger.warning(f"Failed login attempt for user: {username}")
             return jsonify({
                 'success': False,
-                'error': 'Invalid username or password'
+                'error': 'Invalid username or password',
+                'remaining_attempts': remaining_attempts
             }), 401
         
-        # Successful login - return salt for client-side vault key derivation
+        # Successful login - clear failed attempts
+        if username in failed_login_attempts:
+            del failed_login_attempts[username]
+        
+        # Generate JWT tokens
+        tokens = JWTAuth.create_token_pair(str(user.user_id))
+        
+        logger.info(f"User logged in: {username}")
+        
+        # Successful login - return tokens and salt for client-side vault key derivation
         return jsonify({
             'success': True,
             'message': 'Login successful',
             'userId': str(user.user_id),
             'salt': user.salt,
-            'username': user.username
+            'username': user.username,
+            'access_token': tokens['access_token'],
+            'refresh_token': tokens.get('refresh_token'),
+            'token_type': tokens['token_type'],
+            'expires_in': tokens['expires_in']
         }), 200
         
     except Exception as e:
+        logger.error(f"Login failed: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Login failed: {str(e)}'
+            'error': 'Login failed. Please try again.'
         }), 500
 
 
-@auth_bp.route('/check-username', methods=['POST'])
-def check_username():
+@auth_bp.route('/refresh', methods=['POST'])
+def refresh():
     """
-    Check if username is available
+    Refresh access token using refresh token
     
     Request body:
         {
-            "username": "user@example.com"
-        }
-    
-    Response:
-        {
-            "available": true/false
-        }
-    """
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        
-        if not username:
-            return jsonify({
-                'success': False,
-                'error': 'Username is required'
-            }), 400
-        
-        user = User.query.filter_by(username=username).first()
-        
-        return jsonify({
-            'available': user is None
-        }), 200
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@auth_bp.route('/get-salt', methods=['POST'])
-def get_salt():
-    """
-    Get salt for a username (used for vault unlock after page refresh)
-    
-    Request body:
-        {
-            "username": "user@example.com"
+            "refresh_token": "jwt_refresh_token"
         }
     
     Response:
         {
             "success": true,
-            "salt": "base64_salt"
+            "access_token": "new_jwt_token",
+            "token_type": "Bearer",
+            "expires_in": 900
         }
     """
     try:
         data = request.get_json()
-        username = data.get('username')
         
-        if not username:
+        if not data or not data.get('refresh_token'):
             return jsonify({
                 'success': False,
-                'error': 'Username is required'
+                'error': 'Refresh token is required'
             }), 400
         
-        user = User.query.filter_by(username=username).first()
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found'
-            }), 404
+        refresh_token = data.get('refresh_token')
+        
+        # Use refresh token to get new access token
+        tokens = JWTAuth.refresh_access_token(refresh_token)
         
         return jsonify({
             'success': True,
-            'salt': user.salt
+            'access_token': tokens['access_token'],
+            'token_type': tokens['token_type'],
+            'expires_in': tokens['expires_in']
         }), 200
         
     except Exception as e:
+        logger.error(f"Token refresh failed: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
-        }), 500
+            'error': 'Invalid or expired refresh token'
+        }), 401
+
+
+@auth_bp.route('/verify', methods=['GET'])
+@require_auth
+def verify_token():
+    """
+    Verify if current access token is valid
+    
+    Response:
+        {
+            "success": true,
+            "valid": true,
+            "userId": "uuid",
+            "expires_at": "timestamp"
+        }
+    """
+    return jsonify({
+        'success': True,
+        'valid': True,
+        'userId': request.user_id,
+        'expires_at': request.token_payload.get('exp')
+    }), 200
+
+
+@auth_bp.route('/logout', methods=['POST'])
+@require_auth
+def logout():
+    """
+    Logout user (invalidate token server-side)
+    
+    Response:
+        {
+            "success": true,
+            "message": 'Logged out successfully'
+        }
+    """
+    # Add the token JTI to blacklist
+    jti = request.session_jti
+    if jti:
+        add_to_blacklist(jti)
+    
+    logger.info(f"User logged out: {request.user_id}")
+    
+    return jsonify({
+        'success': True,
+        'message': 'Logged out successfully'
+    }), 200

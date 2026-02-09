@@ -32,7 +32,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_API_URL=http://localhost:5000/api
     working_dir: /app/frontend
     command: npm start
     depends_on:

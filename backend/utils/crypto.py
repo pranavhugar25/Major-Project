@@ -8,6 +8,21 @@ import base64
 from typing import Tuple, Optional
 import os
 
+# Import real PQC from liboqs
+from utils.pqc import PQCKeyManager
+
+
+def secure_zeroize(data: bytearray) -> None:
+    """
+    Securely clear sensitive data from memory
+    
+    Args:
+        data: Bytearray to zeroize
+    """
+    if data:
+        for i in range(len(data)):
+            data[i] = 0
+
 
 def generate_salt(length: int = 32) -> str:
     """
@@ -65,149 +80,116 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
     return secrets.compare_digest(computed_hash, stored_hash)
 
 
-class PQCKeyManager:
-    """
-    Manager for Post-Quantum Cryptography keys
-    Handles ML-KEM (Kyber) and ML-DSA (Dilithium) key generation
-    
-    Note: This is a simplified implementation for demonstration.
-    In production, use actual PQC libraries like liboqs or pqcrypto
-    """
-    
-    @staticmethod
-    def generate_kyber_keypair() -> Tuple[str, str]:
-        """
-        Generate ML-KEM (Kyber) key pair for key encapsulation
-        
-        Returns:
-            Tuple of (public_key, private_key) as base64 strings
-            
-        Note: This is a placeholder. In production, use actual Kyber implementation
-        """
-        # Simulated Kyber-1024 keys (actual implementation would use kyber-py or liboqs)
-        # Public key: ~1568 bytes, Private key: ~3168 bytes
-        public_key = secrets.token_bytes(1568)
-        private_key = secrets.token_bytes(3168)
-        
-        return (
-            base64.b64encode(public_key).decode('utf-8'),
-            base64.b64encode(private_key).decode('utf-8')
-        )
-    
-    @staticmethod
-    def generate_dilithium_keypair() -> Tuple[str, str]:
-        """
-        Generate ML-DSA (Dilithium) key pair for digital signatures
-        
-        Returns:
-            Tuple of (public_key, private_key) as base64 strings
-            
-        Note: This is a placeholder. In production, use actual Dilithium implementation
-        """
-        # Simulated Dilithium5 keys (actual implementation would use dilithium-py or liboqs)
-        # Public key: ~2592 bytes, Private key: ~4864 bytes
-        public_key = secrets.token_bytes(2592)
-        private_key = secrets.token_bytes(4864)
-        
-        return (
-            base64.b64encode(public_key).decode('utf-8'),
-            base64.b64encode(private_key).decode('utf-8')
-        )
-    
-    @staticmethod
-    def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
-        """
-        Encapsulate a shared secret using Kyber public key
-        
-        Args:
-            public_key: Base64 encoded Kyber public key
-        
-        Returns:
-            Tuple of (ciphertext, shared_secret) as base64 strings
-        """
-        # Simulated encapsulation (actual implementation would use kyber-py)
-        ciphertext = secrets.token_bytes(1568)
-        shared_secret = secrets.token_bytes(32)
-        
-        return (
-            base64.b64encode(ciphertext).decode('utf-8'),
-            base64.b64encode(shared_secret).decode('utf-8')
-        )
-    
-    @staticmethod
-    def kyber_decapsulate(private_key: str, ciphertext: str) -> str:
-        """
-        Decapsulate shared secret using Kyber private key
-        
-        Args:
-            private_key: Base64 encoded Kyber private key
-            ciphertext: Base64 encoded ciphertext
-        
-        Returns:
-            Base64 encoded shared secret
-        """
-        # Simulated decapsulation (actual implementation would use kyber-py)
-        shared_secret = secrets.token_bytes(32)
-        return base64.b64encode(shared_secret).decode('utf-8')
-    
-    @staticmethod
-    def dilithium_sign(private_key: str, message: str) -> str:
-        """
-        Sign a message using Dilithium private key
-        
-        Args:
-            private_key: Base64 encoded Dilithium private key
-            message: Message to sign
-        
-        Returns:
-            Base64 encoded signature
-        """
-        # Simulated signing (actual implementation would use dilithium-py)
-        signature = secrets.token_bytes(4595)
-        return base64.b64encode(signature).decode('utf-8')
-    
-    @staticmethod
-    def dilithium_verify(public_key: str, message: str, signature: str) -> bool:
-        """
-        Verify a Dilithium signature
-        
-        Args:
-            public_key: Base64 encoded Dilithium public key
-            message: Original message
-            signature: Base64 encoded signature
-        
-        Returns:
-            True if signature is valid, False otherwise
-        """
-        # Simulated verification (actual implementation would use dilithium-py)
-        # In a real implementation, this would cryptographically verify
-        return True
+# ============================================================================
+# Post-Quantum Cryptography - Real Implementation using liboqs
+# ============================================================================
+# These functions provide the real PQC operations using ML-KEM-768 and
+# ML-DSA-65 from the liboqs library (NIST-standardized).
+# 
+# See utils/pqc.py for the full implementation.
+# ============================================================================
 
-
-def derive_vault_key_server_side(master_password: str, salt: str) -> str:
+def generate_kyber_keypair() -> Tuple[str, str]:
     """
-    Derive vault key on server side (for comparison/verification only)
-    
-    NOTE: In a true zero-knowledge system, this should NEVER be called.
-    The vault key should only be derived client-side.
-    This function exists only for demonstration and testing purposes.
-    
-    Args:
-        master_password: Master password
-        salt: Base64 encoded salt
+    Generate ML-KEM-768 key pair for key encapsulation
     
     Returns:
-        Base64 encoded vault key
+        Tuple of (public_key, private_key) as base64 strings
+        
+    Note:
+        Uses liboqs-python for NIST-standard ML-KEM-768 implementation.
+        This provides quantum-resistant key encapsulation.
     """
-    salt_bytes = base64.b64decode(salt)
+    return PQCKeyManager.generate_kyber_keypair()
+
+
+def generate_dilithium_keypair() -> Tuple[str, str]:
+    """
+    Generate ML-DSA-65 key pair for digital signatures
     
-    # Derive 256-bit key using PBKDF2
-    vault_key = hashlib.pbkdf2_hmac(
-        'sha256',
-        master_password.encode('utf-8'),
-        salt_bytes,
-        iterations=600000,
-        dklen=32
-    )
+    Returns:
+        Tuple of (public_key, private_key) as base64 strings
+        
+    Note:
+        Uses liboqs-python for NIST-standard ML-DSA-65 implementation.
+        This provides quantum-resistant digital signatures.
+    """
+    return PQCKeyManager.generate_dilithium_keypair()
+
+
+def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
+    """
+    Encapsulate a shared secret using ML-KEM-768
     
-    return base64.b64encode(vault_key).decode('utf-8')
+    Args:
+        public_key: Base64 encoded ML-KEM-768 public key
+    
+    Returns:
+        Tuple of (ciphertext, shared_secret) as base64 strings
+    """
+    return PQCKeyManager.encapsulate(public_key)
+
+
+def kyber_decapsulate(ciphertext: str, private_key: str) -> str:
+    """
+    Decapsulate shared secret using ML-KEM-768
+    
+    Args:
+        ciphertext: Base64 encoded ciphertext
+        private_key: Base64 encoded ML-KEM-768 private key
+    
+    Returns:
+        Base64 encoded shared secret
+    """
+    return PQCKeyManager.decapsulate(ciphertext, private_key)
+
+
+def dilithium_sign(message: str, private_key: str, public_key: str) -> str:
+    """
+    Sign a message using ML-DSA-65
+    
+    Args:
+        message: Message to sign
+        private_key: Base64 encoded ML-DSA-65 private key
+        public_key: Base64 encoded ML-DSA-65 public key
+    
+    Returns:
+        Base64 encoded signature
+    """
+    return PQCKeyManager.sign(message, private_key, public_key)
+
+
+def dilithium_verify(message: str, signature: str, public_key: str) -> bool:
+    """
+    Verify ML-DSA-65 digital signature
+    
+    Args:
+        message: Original message
+        signature: Base64 encoded signature
+        public_key: Base64 encoded ML-DSA-65 public key
+    
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    return PQCKeyManager.verify(message, signature, public_key)
+
+
+def is_pqc_available() -> bool:
+    """
+    Check if PQC (liboqs) is available
+    
+    Returns:
+        True if liboqs is installed and functional
+    """
+    return PQCKeyManager.is_available()
+
+
+def get_pqc_info() -> dict:
+    """
+    Get information about PQC algorithms
+    
+    Returns:
+        Dictionary with algorithm information
+    """
+    return PQCKeyManager.get_algorithm_info()
+
