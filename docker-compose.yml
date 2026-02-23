@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -15,7 +13,6 @@ services:
       - FLASK_APP=app.py
       - FLASK_ENV=development
     working_dir: /app/backend
-    # Skip venv creation and pip install since dependencies are already in the image
     command: python app.py
     networks:
       - pqc-network
@@ -40,17 +37,22 @@ services:
     networks:
       - pqc-network
 
-  # Production service using nginx + backend
-  production:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    container_name: pqc-production
-    ports:
-      - "80:80"
+  # Test runner - run with: docker-compose run --rm test
+  test:
+    image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    container_name: pqc-test
+    working_dir: /app
+    volumes:
+      - ./tests:/app/tests
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - CI=true
+    command: sh -c "npm init -y && npm install @playwright/test && npx playwright test --reporter=list"
     depends_on:
-      - backend
+      - frontend
+    profiles:
+      - test
     networks:
       - pqc-network
 
