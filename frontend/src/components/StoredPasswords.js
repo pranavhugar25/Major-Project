@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { passwordAPI } from '../utils/api';
-import { decryptPassword } from '../utils/crypto';
+import { decryptPassword, secureZeroize } from '../utils/crypto';
 import '../styles/StoredPasswords.css';
 
 function StoredPasswords({ user, vaultKey }) {
@@ -19,14 +19,42 @@ function StoredPasswords({ user, vaultKey }) {
     fetchPasswords();
   }, []);
 
+  // Auto-hide password after 60 seconds of inactivity
+  useEffect(() => {
+    const timeouts = {};
+    
+    Object.keys(revealedPasswords).forEach(passwordId => {
+      timeouts[passwordId] = setTimeout(() => {
+        handleHidePassword(passwordId);
+      }, 60000);
+    });
+    
+    return () => {
+      Object.values(timeouts).forEach(timeout => clearTimeout(timeout));
+    };
+  }, [revealedPasswords]);
+
+  // Securely clear all revealed passwords when component unmounts
+  useEffect(() => {
+    return () => {
+      // Zeroize all decrypted passwords in memory
+      Object.values(revealedPasswords).forEach(pwd => {
+        try {
+          const pwdBytes = new TextEncoder().encode(pwd);
+          secureZeroize(pwdBytes);
+        } catch (e) {
+          // Ignore errors during cleanup
+        }
+      });
+      setRevealedPasswords({});
+    };
+  }, []);
+
   const fetchPasswords = async () => {
     try {
-      console.log('FetchPasswords - userId:', user.userId);
       const response = await passwordAPI.getAllPasswords(user.userId);
-      console.log('FetchPasswords - response:', response);
       
       if (response.success) {
-        console.log('FetchPasswords - passwords count:', response.passwords?.length);
         setPasswords(response.passwords || []);
       } else {
         setError(response.error || 'Failed to fetch passwords');
@@ -41,9 +69,6 @@ function StoredPasswords({ user, vaultKey }) {
 
   const handleRevealPassword = async (passwordId, encryptedPassword, iv, authTag) => {
     try {
-      console.log('Decrypt - encryptedLength:', encryptedPassword?.length);
-      console.log('Decrypt - ivLength:', iv?.length);
-      console.log('Decrypt - authTag:', authTag);
       const decrypted = await decryptPassword(encryptedPassword, iv, authTag || '', vaultKey);
       setRevealedPasswords(prev => ({
         ...prev,
@@ -55,6 +80,15 @@ function StoredPasswords({ user, vaultKey }) {
   };
 
   const handleHidePassword = (passwordId) => {
+    // Securely zeroize the decrypted password before removing from state
+    if (revealedPasswords[passwordId]) {
+      try {
+        const pwdBytes = new TextEncoder().encode(revealedPasswords[passwordId]);
+        secureZeroize(pwdBytes);
+      } catch (e) {
+        console.error('Failed to zeroize password');
+      }
+    }
     setRevealedPasswords(prev => {
       const updated = { ...prev };
       delete updated[passwordId];

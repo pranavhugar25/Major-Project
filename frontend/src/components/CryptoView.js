@@ -18,7 +18,6 @@ function CryptoView({ user }) {
   const fetchCryptoView = async () => {
     try {
       const response = await passwordAPI.getCryptoView(user.userId);
-      console.log('CryptoView - response:', response);
       
       if (response.success) {
         setCryptoData(response);

@@ -5,7 +5,6 @@
  * Implements AES-256-GCM authenticated encryption using Web Crypto API
  * for maximum security with proper integrity verification.
  */
-import CryptoJS from 'crypto-js';
 
 /**
  * Securely clear sensitive data from memory
@@ -13,7 +12,7 @@ import CryptoJS from 'crypto-js';
  * 
  * @param {ArrayBuffer|Uint8Array} data - Data to zeroize
  */
-const secureZeroize = (data) => {
+export const secureZeroize = (data) => {
   if (data && typeof data.fill === 'function') {
     data.fill(0);
   }
@@ -121,9 +120,9 @@ export const encryptPassword = async (plaintext, vaultKeyBase64) => {
     // The auth tag will be verified during decryption
     
     return {
-      encryptedPassword: btoa(String.fromCharCode(...encryptedArray)),
+      encryptedPassword: btoa(String.fromCharCode(...encryptedArray.slice(0, -16))),
       iv: btoa(String.fromCharCode(...iv)),
-      authTag: ''  // Auth tag managed internally by Web Crypto API
+      authTag: btoa(String.fromCharCode(...new Uint8Array(encryptedArray.slice(-16))))
     };
   } catch (error) {
     console.error('Cryptographic operation failed:', error);
@@ -162,21 +161,10 @@ export const decryptPassword = async (
     // Decode components
     const ciphertext = Uint8Array.from(atob(encryptedPasswordBase64), c => c.charCodeAt(0));
     const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
-    console.log('DecryptDebug - ciphertext length:', ciphertext.length);
-    console.log('DecryptDebug - iv length:', iv.length);
-    
-    // Web Crypto API returns ciphertext with auth tag appended (last 16 bytes)
-    // For decryption, we need to split and recombine: ciphertext + auth tag
-    const ciphertextBytes = ciphertext.slice(0, -16);
-    const authTagBytes = ciphertext.slice(-16);
-    
-    console.log('DecryptDebug - extracted ciphertext:', ciphertextBytes.length, 'bytes');
-    console.log('DecryptDebug - extracted authTag:', authTagBytes.length, 'bytes');
+    const authTag = Uint8Array.from(atob(authTagBase64), c => c.charCodeAt(0));
     
     // Combine ciphertext and auth tag for decryption
-    const encryptedData = new Uint8Array([...ciphertextBytes, ...authTagBytes]);
-    
-    console.log('DecryptDebug - combined for decrypt:', encryptedData.length, 'bytes');
+    const encryptedData = new Uint8Array([...ciphertext, ...authTag]);
     
     // Decrypt and verify auth tag
     const decrypted = await crypto.subtle.decrypt(

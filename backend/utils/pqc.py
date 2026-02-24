@@ -1,406 +1,243 @@
 """
-Real Post-Quantum Cryptography using liboqs
-ML-KEM-768 for key encapsulation
-ML-DSA-65 for digital signatures
+Post-Quantum Cryptography helpers backed by liboqs-python.
 
-This module implements NIST-standardized post-quantum cryptographic
-algorithms for quantum-resistant security.
-
-Reference: https://github.com/open-quantum-safe/liboqs
-NIST PQC: https://csrc.nist.gov/projects/post-quantum-cryptography
+Algorithms:
+- ML-KEM-1024 (KEM, NIST Level 5)
+- ML-DSA-87 (signature, NIST Level 5)
 """
+from __future__ import annotations
+
 import base64
 import logging
-from typing import Tuple, Optional
 from dataclasses import dataclass
+from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Try to import liboqs, provide helpful error if not available
 try:
-    import liboqs
+    from oqs import KeyEncapsulation, Signature, oqs_python_version, oqs_version
+
     LIBOQS_AVAILABLE = True
-except ImportError:
+    LIBOQS_ERROR = None
+except ImportError as exc:  # pragma: no cover - exercised in environments without liboqs
     LIBOQS_AVAILABLE = False
-    logger.warning(
-        "liboqs not installed. PQC features will be disabled. "
-        "Install with: pip install liboqs-python"
-    )
+    LIBOQS_ERROR = str(exc)
+    KeyEncapsulation = None  # type: ignore[assignment]
+    Signature = None  # type: ignore[assignment]
 
 
 @dataclass
 class PQCKeyPair:
-    """Container for PQC key pair"""
+    """Container for base64-encoded public/private key pair."""
+
     public_key: str
     private_key: str
 
 
 @dataclass
 class KEMResult:
-    """Result of key encapsulation"""
+    """Container for base64-encoded KEM output."""
+
     ciphertext: str
     shared_secret: str
 
 
-@dataclass
-class SignatureResult:
-    """Result of digital signature"""
-    signature: str
-
-
 class PQCError(Exception):
-    """Base exception for PQC operations"""
-    pass
+    """Raised when a PQC primitive fails."""
 
 
-class PQCUnavailableError(PQCError):
-    """Raised when liboqs is not available"""
-    pass
+def _b64e(data: bytes) -> str:
+    return base64.b64encode(data).decode("utf-8")
 
 
-class PQCVerificationError(PQCError):
-    """Raised when signature verification fails"""
-    pass
+def _b64d(data: str) -> bytes:
+    return base64.b64decode(data.encode("utf-8"))
 
 
-def _check_liboqs() -> None:
-    """Verify liboqs is available"""
-    if not LIBOQS_AVAILABLE:
-        raise PQCUnavailableError(
-            "liboqs is required for PQC operations. "
-            "Install with: pip install liboqs-python"
-        )
+class MLKEM1024:
+    """ML-KEM-1024 wrapper."""
 
+    ALGORITHM = "ML-KEM-1024"
 
-class MLKEM768:
-    """
-    ML-KEM-768 (formerly Kyber) Key Encapsulation Mechanism
-    
-    NIST Level 3 security (approximately AES-128 equivalent)
-    Key sizes:
-    - Public key: 1184 bytes
-    - Secret key: 2400 bytes
-    - Ciphertext: 1088 bytes
-    - Shared secret: 32 bytes
-    """
-    
-    ALGORITHM = "ML-KEM-768"
-    
+    @staticmethod
+    def is_available() -> bool:
+        if not LIBOQS_AVAILABLE:
+            return False
+        try:
+            with KeyEncapsulation(MLKEM1024.ALGORITHM):
+                return True
+        except Exception:
+            return False
+
     @staticmethod
     def generate_keypair() -> PQCKeyPair:
-        """
-        Generate ML-KEM-768 key pair
-        
-        Returns:
-            PQCKeyPair with base64-encoded public and private keys
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-        """
-        _check_liboqs()
-        
         try:
-            with liboqs.KeyEncapsulation(MLKEM768.ALGORITHM) as kem:
-                public_key = kem.generate_public_key()
-                secret_key = kem.generate_secret_key()
-                
-                return PQCKeyPair(
-                    public_key=base64.b64encode(public_key).decode('utf-8'),
-                    private_key=base64.b64encode(secret_key).decode('utf-8')
-                )
-        except Exception as e:
-            logger.error(f"ML-KEM-768 key generation failed: {e}")
-            raise PQCError(f"Key generation failed: {e}")
-    
+            with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
+                public_key = kem.generate_keypair()
+                private_key = kem.export_secret_key()
+            return PQCKeyPair(public_key=_b64e(public_key), private_key=_b64e(private_key))
+        except Exception as exc:
+            logger.error("ML-KEM key generation failed: %s", exc)
+            raise PQCError(f"ML-KEM key generation failed: {exc}") from exc
+
     @staticmethod
     def encapsulate(public_key_b64: str) -> KEMResult:
-        """
-        Encapsulate a shared secret using ML-KEM-768
-        
-        Args:
-            public_key_b64: Base64-encoded public key
-            
-        Returns:
-            KEMResult with ciphertext and shared_secret (both base64-encoded)
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-            PQCError: If encapsulation fails
-        """
-        _check_liboqs()
-        
         try:
-            public_key = base64.b64decode(public_key_b64)
-            
-            with liboqs.KeyEncapsulation(MLKEM768.ALGORITHM) as kem:
-                ciphertext = kem.encap_secret(public_key)
-                shared_secret = kem.export_shared_secret()
-                
-                return KEMResult(
-                    ciphertext=base64.b64encode(ciphertext).decode('utf-8'),
-                    shared_secret=base64.b64encode(shared_secret).decode('utf-8')
-                )
-        except Exception as e:
-            logger.error(f"ML-KEM-768 encapsulation failed: {e}")
-            raise PQCError(f"Encapsulation failed: {e}")
-    
+            public_key = _b64d(public_key_b64)
+            with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
+                # liboqs-python versions differ: some return tuple, some return ciphertext only.
+                encap_result = kem.encap_secret(public_key)
+                if isinstance(encap_result, tuple):
+                    ciphertext, shared_secret = encap_result
+                else:
+                    ciphertext = encap_result
+                    shared_secret = kem.decap_secret(ciphertext)
+            return KEMResult(ciphertext=_b64e(ciphertext), shared_secret=_b64e(shared_secret))
+        except Exception as exc:
+            logger.error("ML-KEM encapsulation failed: %s", exc)
+            raise PQCError(f"ML-KEM encapsulation failed: {exc}") from exc
+
     @staticmethod
     def decapsulate(ciphertext_b64: str, private_key_b64: str) -> str:
-        """
-        Decapsulate shared secret using ML-KEM-768
-        
-        Args:
-            ciphertext_b64: Base64-encoded ciphertext
-            private_key_b64: Base64-encoded private key
-            
-        Returns:
-            Base64-encoded shared secret
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-            PQCError: If decapsulation fails
-        """
-        _check_liboqs()
-        
         try:
-            ciphertext = base64.b64decode(ciphertext_b64)
-            private_key = base64.b64decode(private_key_b64)
-            
-            with liboqs.KeyEncapsulation(MLKEM768.ALGORITHM, private_key) as kem:
+            ciphertext = _b64d(ciphertext_b64)
+            private_key = _b64d(private_key_b64)
+            with KeyEncapsulation(MLKEM1024.ALGORITHM, secret_key=private_key) as kem:
                 shared_secret = kem.decap_secret(ciphertext)
-                return base64.b64encode(shared_secret).decode('utf-8')
-        except Exception as e:
-            logger.error(f"ML-KEM-768 decapsulation failed: {e}")
-            raise PQCError(f"Decapsulation failed: {e}")
+            return _b64e(shared_secret)
+        except Exception as exc:
+            logger.error("ML-KEM decapsulation failed: %s", exc)
+            raise PQCError(f"ML-KEM decapsulation failed: {exc}") from exc
 
 
-class MLDSA65:
-    """
-    ML-DSA-65 (formerly Dilithium) Digital Signature Algorithm
-    
-    NIST Level 3 security (approximately AES-192 equivalent)
-    Key sizes:
-    - Public key: 2592 bytes
-    - Secret key: 4000 bytes
-    - Signature: ~3295 bytes (variable)
-    """
-    
-    ALGORITHM = "ML-DSA-65"
-    
+class MLDSA87:
+    """ML-DSA-87 wrapper."""
+
+    ALGORITHM = "ML-DSA-87"
+
+    @staticmethod
+    def is_available() -> bool:
+        if not LIBOQS_AVAILABLE:
+            return False
+        try:
+            with Signature(MLDSA87.ALGORITHM):
+                return True
+        except Exception:
+            return False
+
     @staticmethod
     def generate_keypair() -> PQCKeyPair:
-        """
-        Generate ML-DSA-65 key pair
-        
-        Returns:
-            PQCKeyPair with base64-encoded public and private keys
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-            PQCError: If key generation fails
-        """
-        _check_liboqs()
-        
         try:
-            with liboqs.Signature(MLDSA65.ALGORITHM) as sig:
-                public_key = sig.generate_keypair()
-                secret_key = sig.export_secret_key(public_key)
-                
-                return PQCKeyPair(
-                    public_key=base64.b64encode(public_key).decode('utf-8'),
-                    private_key=base64.b64encode(secret_key).decode('utf-8')
-                )
-        except Exception as e:
-            logger.error(f"ML-DSA-65 key generation failed: {e}")
-            raise PQCError(f"Key generation failed: {e}")
-    
+            with Signature(MLDSA87.ALGORITHM) as sig:
+                generated = sig.generate_keypair()
+                if isinstance(generated, tuple):
+                    public_key, private_key = generated
+                else:
+                    public_key = generated
+                    private_key = sig.export_secret_key()
+            return PQCKeyPair(public_key=_b64e(public_key), private_key=_b64e(private_key))
+        except Exception as exc:
+            logger.error("ML-DSA key generation failed: %s", exc)
+            raise PQCError(f"ML-DSA key generation failed: {exc}") from exc
+
     @staticmethod
-    def sign(message: str, private_key_b64: str, public_key_b64: str) -> str:
-        """
-        Create ML-DSA-65 digital signature
-        
-        Args:
-            message: Message to sign (utf-8 string)
-            private_key_b64: Base64-encoded private key
-            public_key_b64: Base64-encoded public key
-            
-        Returns:
-            Base64-encoded signature
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-            PQCError: If signing fails
-        """
-        _check_liboqs()
-        
+    def sign(message: bytes, private_key_b64: str) -> str:
         try:
-            message_bytes = message.encode('utf-8')
-            private_key = base64.b64decode(private_key_b64)
-            public_key = base64.b64decode(public_key_b64)
-            
-            with liboqs.Signature(MLDSA65.ALGORITHM, public_key) as sig:
-                signature = sig.sign(message_bytes, private_key)
-                return base64.b64encode(signature).decode('utf-8')
-        except Exception as e:
-            logger.error(f"ML-DSA-65 signing failed: {e}")
-            raise PQCError(f"Signing failed: {e}")
-    
+            private_key = _b64d(private_key_b64)
+            with Signature(MLDSA87.ALGORITHM, secret_key=private_key) as sig:
+                signature = sig.sign(message)
+            return _b64e(signature)
+        except Exception as exc:
+            logger.error("ML-DSA signing failed: %s", exc)
+            raise PQCError(f"ML-DSA signing failed: {exc}") from exc
+
     @staticmethod
-    def verify(message: str, signature_b64: str, public_key_b64: str) -> bool:
-        """
-        Verify ML-DSA-65 digital signature
-        
-        Args:
-            message: Original message (utf-8 string)
-            signature_b64: Base64-encoded signature
-            public_key_b64: Base64-encoded public key
-            
-        Returns:
-            True if signature is valid, False if invalid
-            
-        Raises:
-            PQCUnavailableError: If liboqs is not installed
-            PQCError: If verification fails (likely due to corrupted data)
-        """
-        _check_liboqs()
-        
+    def verify(message: bytes, signature_b64: str, public_key_b64: str) -> bool:
         try:
-            message_bytes = message.encode('utf-8')
-            signature = base64.b64decode(signature_b64)
-            public_key = base64.b64decode(public_key_b64)
-            
-            with liboqs.Signature(MLDSA65.ALGORITHM) as sig:
-                return sig.verify(message_bytes, signature, public_key)
-        except Exception as e:
-            logger.warning(f"ML-DSA-65 verification failed: {e}")
+            signature = _b64d(signature_b64)
+            public_key = _b64d(public_key_b64)
+            with Signature(MLDSA87.ALGORITHM) as sig:
+                return bool(sig.verify(message, signature, public_key))
+        except Exception as exc:
+            logger.warning("ML-DSA verification failed: %s", exc)
             return False
 
 
 class PQCKeyManager:
-    """
-    Unified manager for Post-Quantum Cryptography operations
-    
-    Provides simplified interface for:
-    - ML-KEM-768 key encapsulation (for session key exchange)
-    - ML-DSA-65 digital signatures (for authentication)
-    """
-    
-    # Algorithm constants
-    KEM_ALGORITHM = "ML-KEM-768"
-    SIG_ALGORITHM = "ML-DSA-65"
-    
-    @staticmethod
-    def generate_kyber_keypair() -> Tuple[str, str]:
-        """
-        Generate ML-KEM-768 key pair for key encapsulation
-        
-        Returns:
-            Tuple of (public_key, private_key) as base64 strings
-            
-        Note:
-            This is the primary method for establishing quantum-resistant
-            session keys between client and server.
-        """
-        keypair = MLKEM768.generate_keypair()
-        return (keypair.public_key, keypair.private_key)
-    
-    @staticmethod
-    def generate_dilithium_keypair() -> Tuple[str, str]:
-        """
-        Generate ML-DSA-65 key pair for digital signatures
-        
-        Returns:
-            Tuple of (public_key, private_key) as base64 strings
-            
-        Note:
-            This is used for server authentication and message signing.
-        """
-        keypair = MLDSA65.generate_keypair()
-        return (keypair.public_key, keypair.private_key)
-    
-    @staticmethod
-    def encapsulate(public_key_b64: str) -> Tuple[str, str]:
-        """
-        Encapsulate shared secret using ML-KEM-768
-        
-        Args:
-            public_key_b64: Base64-encoded Kyber public key
-            
-        Returns:
-            Tuple of (ciphertext, shared_secret) as base64 strings
-            
-        Note:
-            The shared secret can be used for symmetric encryption.
-        """
-        result = MLKEM768.encapsulate(public_key_b64)
-        return (result.ciphertext, result.shared_secret)
-    
-    @staticmethod
-    def decapsulate(ciphertext_b64: str, private_key_b64: str) -> str:
-        """
-        Decapsulate shared secret using ML-KEM-768
-        
-        Args:
-            ciphertext_b64: Base64-encoded ciphertext
-            private_key_b64: Base64-encoded private key
-            
-        Returns:
-            Base64-encoded shared secret
-        """
-        return MLKEM768.decapsulate(ciphertext_b64, private_key_b64)
-    
-    @staticmethod
-    def sign(message: str, private_key_b64: str, public_key_b64: str) -> str:
-        """
-        Sign message using ML-DSA-65
-        
-        Args:
-            message: Message to sign
-            private_key_b64: Base64-encoded private key
-            public_key_b64: Base64-encoded public key
-            
-        Returns:
-            Base64-encoded signature
-        """
-        return MLDSA65.sign(message, private_key_b64, public_key_b64)
-    
-    @staticmethod
-    def verify(message: str, signature_b64: str, public_key_b64: str) -> bool:
-        """
-        Verify ML-DSA-65 signature
-        
-        Args:
-            message: Original message
-            signature_b64: Base64-encoded signature
-            public_key_b64: Base64-encoded public key
-            
-        Returns:
-            True if signature is valid, False otherwise
-        """
-        return MLDSA65.verify(message, signature_b64, public_key_b64)
-    
+    """Facade used by the rest of the backend."""
+
     @staticmethod
     def is_available() -> bool:
-        """
-        Check if liboqs is available
-        
-        Returns:
-            True if liboqs is installed and functional
-        """
-        return LIBOQS_AVAILABLE
-    
+        return LIBOQS_AVAILABLE and MLKEM1024.is_available() and MLDSA87.is_available()
+
     @staticmethod
-    def get_algorithm_info() -> dict:
-        """
-        Get information about enabled PQC algorithms
-        
-        Returns:
-            Dictionary with algorithm information
-        """
-        return {
-            "kem_algorithm": MLKEM768.ALGORITHM if LIBOQS_AVAILABLE else None,
-            "sig_algorithm": MLDSA65.ALGORITHM if LIBOQS_AVAILABLE else None,
-            "available": LIBOQS_AVAILABLE,
-            "nist_level": 3,
-            "description": "NIST Level 3 post-quantum cryptography"
+    def self_test() -> bool:
+        """Run a minimal runtime test across KEM and signature primitives."""
+        if not PQCKeyManager.is_available():
+            return False
+        try:
+            kem_public, kem_private = PQCKeyManager.generate_kyber_keypair()
+            ciphertext, shared_secret_1 = PQCKeyManager.encapsulate(kem_public)
+            shared_secret_2 = PQCKeyManager.decapsulate(ciphertext, kem_private)
+            if shared_secret_1 != shared_secret_2:
+                return False
+
+            sig_public, sig_private = PQCKeyManager.generate_dilithium_keypair()
+            message = "pqc-self-test"
+            signature = PQCKeyManager.sign(message, sig_private, sig_public)
+            return PQCKeyManager.verify(message, signature, sig_public)
+        except Exception as exc:
+            logger.error("PQC self-test failed: %s", exc)
+            return False
+
+    @staticmethod
+    def generate_kyber_keypair() -> Tuple[str, str]:
+        kp = MLKEM1024.generate_keypair()
+        return kp.public_key, kp.private_key
+
+    @staticmethod
+    def generate_dilithium_keypair() -> Tuple[str, str]:
+        kp = MLDSA87.generate_keypair()
+        return kp.public_key, kp.private_key
+
+    @staticmethod
+    def encapsulate(public_key: str) -> Tuple[str, str]:
+        result = MLKEM1024.encapsulate(public_key)
+        return result.ciphertext, result.shared_secret
+
+    @staticmethod
+    def decapsulate(ciphertext: str, private_key: str) -> str:
+        return MLKEM1024.decapsulate(ciphertext, private_key)
+
+    @staticmethod
+    def sign(message: str, private_key: str, public_key: str) -> str:
+        del public_key  # retained for compatibility with existing call sites
+        return MLDSA87.sign(message.encode("utf-8"), private_key)
+
+    @staticmethod
+    def verify(message: str, signature: str, public_key: str) -> bool:
+        return MLDSA87.verify(message.encode("utf-8"), signature, public_key)
+
+    @staticmethod
+    def get_algorithm_info() -> Dict[str, object]:
+        info: Dict[str, object] = {
+            "kem_algorithm": MLKEM1024.ALGORITHM,
+            "sig_algorithm": MLDSA87.ALGORITHM,
+            "kem_security_level": "NIST Level 5",
+            "sig_security_level": "NIST Level 5",
+            "kem_public_key_size": 1568,
+            "kem_private_key_size": 3168,
+            "kem_ciphertext_size": 1568,
+            "kem_shared_secret_size": 32,
+            "sig_public_key_size": 2592,
+            "sig_private_key_size": 4896,
+            "sig_signature_size": 4595,
+            "available": PQCKeyManager.is_available(),
+            "self_test_passed": PQCKeyManager.self_test(),
         }
+        if LIBOQS_AVAILABLE:
+            info["liboqs_version"] = oqs_version()
+            info["liboqs_python_version"] = oqs_python_version()
+        else:
+            info["error"] = LIBOQS_ERROR
+        return info

@@ -14,7 +14,7 @@ class User(db.Model):
     user_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     username = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    master_password_hash = db.Column(db.String(512), nullable=False)
+    master_password_hash = db.Column(db.String(1024), nullable=False)
     salt = db.Column(db.String(512), nullable=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

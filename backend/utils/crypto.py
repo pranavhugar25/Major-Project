@@ -5,8 +5,7 @@ Handles hashing, PQC key generation, and verification
 import hashlib
 import secrets
 import base64
-from typing import Tuple, Optional
-import os
+from typing import Tuple
 
 # Import real PQC from liboqs
 from utils.pqc import PQCKeyManager
@@ -83,21 +82,21 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 # ============================================================================
 # Post-Quantum Cryptography - Real Implementation using liboqs
 # ============================================================================
-# These functions provide the real PQC operations using ML-KEM-768 and
-# ML-DSA-65 from the liboqs library (NIST-standardized).
+# These functions provide the real PQC operations using ML-KEM-1024 and
+# ML-DSA-87 from the liboqs library (NIST-standardized).
 # 
 # See utils/pqc.py for the full implementation.
 # ============================================================================
 
 def generate_kyber_keypair() -> Tuple[str, str]:
     """
-    Generate ML-KEM-768 key pair for key encapsulation
+    Generate ML-KEM-1024 key pair for key encapsulation
     
     Returns:
         Tuple of (public_key, private_key) as base64 strings
         
     Note:
-        Uses liboqs-python for NIST-standard ML-KEM-768 implementation.
+        Uses liboqs-python for NIST-standard ML-KEM-1024 implementation.
         This provides quantum-resistant key encapsulation.
     """
     return PQCKeyManager.generate_kyber_keypair()
@@ -105,13 +104,13 @@ def generate_kyber_keypair() -> Tuple[str, str]:
 
 def generate_dilithium_keypair() -> Tuple[str, str]:
     """
-    Generate ML-DSA-65 key pair for digital signatures
+    Generate ML-DSA-87 key pair for digital signatures
     
     Returns:
         Tuple of (public_key, private_key) as base64 strings
         
     Note:
-        Uses liboqs-python for NIST-standard ML-DSA-65 implementation.
+        Uses liboqs-python for NIST-standard ML-DSA-87 implementation.
         This provides quantum-resistant digital signatures.
     """
     return PQCKeyManager.generate_dilithium_keypair()
@@ -119,10 +118,10 @@ def generate_dilithium_keypair() -> Tuple[str, str]:
 
 def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
     """
-    Encapsulate a shared secret using ML-KEM-768
+    Encapsulate a shared secret using ML-KEM-1024
     
     Args:
-        public_key: Base64 encoded ML-KEM-768 public key
+        public_key: Base64 encoded ML-KEM-1024 public key
     
     Returns:
         Tuple of (ciphertext, shared_secret) as base64 strings
@@ -132,11 +131,11 @@ def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
 
 def kyber_decapsulate(ciphertext: str, private_key: str) -> str:
     """
-    Decapsulate shared secret using ML-KEM-768
+    Decapsulate shared secret using ML-KEM-1024
     
     Args:
         ciphertext: Base64 encoded ciphertext
-        private_key: Base64 encoded ML-KEM-768 private key
+        private_key: Base64 encoded ML-KEM-1024 private key
     
     Returns:
         Base64 encoded shared secret
@@ -146,12 +145,12 @@ def kyber_decapsulate(ciphertext: str, private_key: str) -> str:
 
 def dilithium_sign(message: str, private_key: str, public_key: str) -> str:
     """
-    Sign a message using ML-DSA-65
+    Sign a message using ML-DSA-87
     
     Args:
         message: Message to sign
-        private_key: Base64 encoded ML-DSA-65 private key
-        public_key: Base64 encoded ML-DSA-65 public key
+        private_key: Base64 encoded ML-DSA-87 private key
+        public_key: Base64 encoded ML-DSA-87 public key
     
     Returns:
         Base64 encoded signature
@@ -161,12 +160,12 @@ def dilithium_sign(message: str, private_key: str, public_key: str) -> str:
 
 def dilithium_verify(message: str, signature: str, public_key: str) -> bool:
     """
-    Verify ML-DSA-65 digital signature
+    Verify ML-DSA-87 digital signature
     
     Args:
         message: Original message
         signature: Base64 encoded signature
-        public_key: Base64 encoded ML-DSA-65 public key
+        public_key: Base64 encoded ML-DSA-87 public key
     
     Returns:
         True if signature is valid, False otherwise
@@ -181,7 +180,7 @@ def is_pqc_available() -> bool:
     Returns:
         True if liboqs is installed and functional
     """
-    return PQCKeyManager.is_available()
+    return PQCKeyManager.is_available() and PQCKeyManager.self_test()
 
 
 def get_pqc_info() -> dict:

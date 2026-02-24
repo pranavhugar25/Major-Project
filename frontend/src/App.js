@@ -8,6 +8,8 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import VaultLock from './components/VaultLock';
+import { secureZeroize } from './utils/crypto';
+import { clearAuthTokens, isAuthenticated } from './utils/api';
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'vault-lock', 'dashboard'
@@ -18,12 +20,15 @@ function App() {
   // Check for existing session on mount
   useEffect(() => {
     const storedUser = sessionStorage.getItem('pqc_user');
-    if (storedUser) {
+    if (storedUser && isAuthenticated()) {
       const userData = JSON.parse(storedUser);
       setUser(userData);
       setIsVaultLocked(true);
       setCurrentView('vault-lock');
+      return;
     }
+    sessionStorage.removeItem('pqc_user');
+    clearAuthTokens();
   }, []);
 
   // Handle successful login
@@ -53,10 +58,20 @@ function App() {
 
   // Handle logout
   const handleLogout = () => {
+    // Securely clear vault key from memory before logout
+    if (vaultKey) {
+      try {
+        const keyBytes = Uint8Array.from(atob(vaultKey), c => c.charCodeAt(0));
+        secureZeroize(keyBytes);
+      } catch (e) {
+        console.error('Failed to zeroize vault key');
+      }
+    }
     setUser(null);
     setVaultKey(null);
     setIsVaultLocked(false);
     sessionStorage.removeItem('pqc_user');
+    clearAuthTokens();
     setCurrentView('login');
   };
 
@@ -66,6 +81,39 @@ function App() {
     setIsVaultLocked(true);
     setCurrentView('vault-lock');
   };
+
+  // Auto-lock after 15 minutes of inactivity
+  useEffect(() => {
+    let inactivityTimeout;
+    
+    const resetInactivityTimer = () => {
+      if (inactivityTimeout) {
+        clearTimeout(inactivityTimeout);
+      }
+      if (!isVaultLocked && vaultKey) {
+        inactivityTimeout = setTimeout(() => {
+          handleLockVault();
+        }, 15 * 60 * 1000); // 15 minutes
+      }
+    };
+    
+    // Listen for user activity
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(event => {
+      window.addEventListener(event, resetInactivityTimer);
+    });
+    
+    resetInactivityTimer();
+    
+    return () => {
+      if (inactivityTimeout) {
+        clearTimeout(inactivityTimeout);
+      }
+      events.forEach(event => {
+        window.removeEventListener(event, resetInactivityTimer);
+      });
+    };
+  }, [vaultKey, isVaultLocked]);
 
   return (
     <div className="app">

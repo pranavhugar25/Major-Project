@@ -34,25 +34,27 @@ function AddPassword({ user, vaultKey }) {
     setLoading(true);
 
     try {
-      // Validate URL format
-      const urlPattern = /^https?:\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+$/;
-      if (siteUrl && !urlPattern.test(siteUrl)) {
-        setError('Please enter a valid URL format');
+      // Validate URL format (more permissive - allows domain-only URLs)
+      const urlPattern = /^(https?:\/\/)?([\w-]+\.)+[\w-]+(\/[\w\-./?%&=]*)?$/i;
+      const trimmedUrl = siteUrl.trim();
+      if (siteUrl && !urlPattern.test(trimmedUrl)) {
+        setError('Please enter a valid URL (e.g., google.com or https://google.com)');
         setLoading(false);
         return;
       }
       
+      // Normalize URL - add https:// if no protocol provided
+      const normalizedUrl = trimmedUrl.startsWith('http') 
+        ? trimmedUrl 
+        : `https://${trimmedUrl}`;
+      
       // Encrypt password client-side
-      console.log('AddPassword - vaultKey:', vaultKey ? 'present' : 'missing');
-      console.log('AddPassword - password:', password ? 'present' : 'missing');
-      console.log('AddPassword - salt:', user.salt ? 'present' : 'missing');
       const { encryptedPassword, iv, authTag } = await encryptPassword(password, vaultKey);
-      console.log('AddPassword - encrypted:', { encryptedPassword: !!encryptedPassword, ivLength: iv?.length, authTag: authTag });
 
       // Send encrypted data to server
       const response = await passwordAPI.addPassword({
         userId: user.userId,
-        siteUrl: siteUrl,
+        siteUrl: normalizedUrl,
         siteUsername: siteUsername,
         encryptedPassword: encryptedPassword,
         iv: iv,

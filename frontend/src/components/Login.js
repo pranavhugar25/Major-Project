@@ -26,13 +26,8 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
       if (response.success) {
         setFailedAttempts(0);
         
-        // Debug logging
-        console.log('Login - salt received:', response.salt ? 'present' : 'missing');
-        console.log('Login - salt length:', response.salt?.length);
-        
         // Derive vault key client-side
         const vaultKey = await deriveVaultKey(masterPassword, response.salt);
-        console.log('Login - vaultKey derived:', vaultKey ? 'present' : 'missing');
 
         // Pass user data and vault key to parent
         onLoginSuccess({
@@ -42,11 +37,21 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
         }, vaultKey);
       } else {
         setFailedAttempts(prev => prev + 1);
-        setError('Invalid username or password');
+        if (response.retry_after) {
+          setError(`Too many failed attempts. Try again in ${response.retry_after} seconds.`);
+        } else {
+          setError(response.error || 'Invalid username or password');
+        }
       }
     } catch (err) {
       setFailedAttempts(prev => prev + 1);
-      setError('Login failed. Please try again.');
+      const apiError = err.response?.data?.error;
+      const retryAfter = err.response?.data?.retry_after;
+      if (retryAfter) {
+        setError(`Too many failed attempts. Try again in ${retryAfter} seconds.`);
+      } else {
+        setError(apiError || 'Login failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,18 @@
 /**
  * API service for communicating with the backend
  * JWT-based authentication with automatic token management
+ * 
+ * SECURITY RECOMMENDATIONS FOR PRODUCTION:
+ * 
+ * 1. Use httpOnly, Secure, SameSite=Strict cookies for tokens
+ * 2. Implement CSRF protection with CSRF tokens
+ * 3. Add Content-Security-Policy headers
+ * 4. Implement token rotation
+ * 5. Use shorter access token lifetimes (5-15 minutes)
+ * 6. Consider using Refresh Token Rotation
+ * 
+ * Current implementation uses sessionStorage which is vulnerable to XSS attacks.
+ * For production, implement httpOnly cookies on the backend.
  */
 import axios from 'axios';
 
@@ -9,6 +21,8 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'pqc_access_token';
 const REFRESH_TOKEN_KEY = 'pqc_refresh_token';
+const TOKEN_EXPIRY_KEY = 'pqc_token_expiry';
+const CSRF_TOKEN_KEY = 'pqc_csrf_token';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -28,6 +42,13 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const method = (config.method || 'GET').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrfToken = sessionStorage.getItem(CSRF_TOKEN_KEY);
+      if (csrfToken) {
+        config.headers['X-CSRF-Token'] = csrfToken;
+      }
+    }
     return config;
   },
   (error) => {
@@ -45,8 +66,12 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     
-    // Handle 401 errors - attempt token refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Handle 401 errors or token expiration - attempt token refresh
+    if (
+      (error.response?.status === 401 || isTokenExpired()) &&
+      !originalRequest._retry &&
+      !String(originalRequest?.url || '').includes('/auth/refresh')
+    ) {
       originalRequest._retry = true;
       
       const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
@@ -88,14 +113,32 @@ api.interceptors.response.use(
 
 /**
  * Store authentication tokens
+ * 
+ * SECURITY NOTE: For production, use httpOnly cookies instead of sessionStorage
+ * to prevent XSS token theft. This requires backend cookie handling support.
+ * 
+ * Current implementation uses sessionStorage for:
+ * - Persistence across page refreshes within same tab
+ * - Accessibility for token refresh operations
+ * 
+ * Risks: XSS attacks can steal tokens from sessionStorage
+ * Mitigation: Implement httpOnly cookies on backend
+ * 
  * @param {object} tokenData - Object containing access_token, refresh_token, expires_in
  */
 export const setAuthTokens = (tokenData) => {
   if (tokenData.access_token) {
     sessionStorage.setItem(ACCESS_TOKEN_KEY, tokenData.access_token);
+    // Store expiration time (default: 15 minutes)
+    const expiresIn = tokenData.expires_in || 900; // 15 minutes in seconds
+    const expiryTime = Date.now() + (expiresIn * 1000);
+    sessionStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString());
   }
   if (tokenData.refresh_token) {
     sessionStorage.setItem(REFRESH_TOKEN_KEY, tokenData.refresh_token);
+  }
+  if (tokenData.csrf_token) {
+    sessionStorage.setItem(CSRF_TOKEN_KEY, tokenData.csrf_token);
   }
 };
 
@@ -105,6 +148,19 @@ export const setAuthTokens = (tokenData) => {
 export const clearAuthTokens = () => {
   sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  sessionStorage.removeItem(CSRF_TOKEN_KEY);
+};
+
+/**
+ * Check if access token is expired
+ * @returns {boolean} True if token is expired or no token exists
+ */
+export const isTokenExpired = () => {
+  const expiryStr = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!expiryStr) return true;
+  const expiryTime = parseInt(expiryStr, 10);
+  return Date.now() >= expiryTime;
 };
 
 /**
@@ -120,7 +176,7 @@ export const getAccessToken = () => {
  * @returns {boolean}
  */
 export const isAuthenticated = () => {
-  return !!getAccessToken();
+  return !!getAccessToken() && !isTokenExpired();
 };
 
 /**
@@ -145,6 +201,7 @@ export const handleLoginSuccess = (loginData) => {
   setAuthTokens({
     access_token: loginData.access_token,
     refresh_token: loginData.refresh_token,
+    csrf_token: loginData.csrf_token,
     expires_in: loginData.expires_in
   });
   
@@ -212,6 +269,9 @@ export const authAPI = {
     const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
       refresh_token: refreshToken
     });
+    if (response.data?.success) {
+      setAuthTokens(response.data);
+    }
     return response.data;
   },
 
@@ -230,7 +290,10 @@ export const authAPI = {
    */
   logout: async () => {
     try {
-      await api.post('/auth/logout');
+      const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      await api.post('/auth/logout', {
+        refresh_token: refreshToken || undefined
+      });
     } finally {
       handleLogout();
     }
