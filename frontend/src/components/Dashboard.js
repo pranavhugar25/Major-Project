@@ -6,12 +6,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AddPassword from './AddPassword';
 import StoredPasswords from './StoredPasswords';
 import CryptoView from './CryptoView';
+import Benchmark from './Benchmark';
 import '../styles/Dashboard.css';
 
 const VAULT_LOCK_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
 
 function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
-  const [currentView, setCurrentView] = useState('add'); // 'add', 'stored', 'crypto'
+  const [currentView, setCurrentView] = useState('add'); // 'add', 'stored', 'crypto', 'benchmark'
   const [isLocked, setIsLocked] = useState(false);
   const idleTimeoutRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
@@ -22,7 +23,7 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
     if (idleTimeoutRef.current) {
       clearTimeout(idleTimeoutRef.current);
     }
-    
+
     idleTimeoutRef.current = setTimeout(() => {
       const idleTime = Date.now() - lastActivityRef.current;
       if (idleTime >= VAULT_LOCK_TIMEOUT) {
@@ -43,14 +44,14 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
   // Set up activity listeners
   useEffect(() => {
     const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-    
+
     const handleActivity = () => {
       if (!isLocked) {
         resetIdleTimer();
       }
     };
 
-    activityEvents.forEach(event => {
+    activityEvents.forEach((event) => {
       document.addEventListener(event, handleActivity);
     });
 
@@ -58,7 +59,7 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
     resetIdleTimer();
 
     return () => {
-      activityEvents.forEach(event => {
+      activityEvents.forEach((event) => {
         document.removeEventListener(event, handleActivity);
       });
       if (idleTimeoutRef.current) {
@@ -72,7 +73,7 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
     return (
       <div className="dashboard-lock-screen">
         <div className="lock-message">
-          <div className="lock-icon">🔒</div>
+          <div className="lock-icon">LOCK</div>
           <h2>Vault Locked</h2>
           <p>Your vault has been automatically locked due to inactivity.</p>
           <p>Please log in again to continue.</p>
@@ -88,39 +89,48 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
     <div className="dashboard">
       <div className="sidebar">
         <div className="sidebar-header">
-          <div className="vault-icon">🔒</div>
+          <div className="vault-icon">LOCK</div>
           <h2>PQC Vault</h2>
         </div>
 
         <nav className="sidebar-nav">
-          <button 
+          <button
             className={`nav-item ${currentView === 'add' ? 'active' : ''}`}
             onClick={() => setCurrentView('add')}
           >
-            <span className="nav-icon">➕</span>
+            <span className="nav-icon">+</span>
             <span>Add Password</span>
           </button>
 
-          <button 
+          <button
             className={`nav-item ${currentView === 'stored' ? 'active' : ''}`}
             onClick={() => setCurrentView('stored')}
           >
-            <span className="nav-icon">📁</span>
+            <span className="nav-icon">DB</span>
             <span>Stored Passwords</span>
           </button>
 
-          <button 
+          <button
             className={`nav-item ${currentView === 'crypto' ? 'active' : ''}`}
             onClick={() => setCurrentView('crypto')}
           >
-            <span className="nav-icon">🔧</span>
+            <span className="nav-icon">CR</span>
             <span>Crypto View</span>
+          </button>
+
+          <button
+            className={`nav-item ${currentView === 'benchmark' ? 'active' : ''}`}
+            onClick={() => setCurrentView('benchmark')}
+            data-testid="nav-benchmark"
+          >
+            <span className="nav-icon">BM</span>
+            <span>Benchmark</span>
           </button>
         </nav>
 
         <div className="sidebar-footer">
           <div className="user-profile">
-            <div className="user-avatar">👤</div>
+            <div className="user-avatar">U</div>
             <div className="user-details">
               <p className="user-name">{user.username}</p>
               <p className="user-status">Vault Unlocked</p>
@@ -129,11 +139,11 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
 
           <div className="sidebar-actions">
             <button onClick={handleVaultLock} className="lock-button">
-              <span>🔒</span>
+              <span>LOCK</span>
               Lock Vault
             </button>
             <button onClick={onLogout} className="logout-button">
-              <span>🚪</span>
+              <span>OUT</span>
               Sign Out
             </button>
           </div>
@@ -151,6 +161,10 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
 
         {currentView === 'crypto' && (
           <CryptoView user={user} vaultKey={vaultKey} />
+        )}
+
+        {currentView === 'benchmark' && (
+          <Benchmark user={user} />
         )}
       </div>
     </div>

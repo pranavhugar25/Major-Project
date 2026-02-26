@@ -18,13 +18,18 @@ import axios from 'axios';
 import { ml_kem1024 } from '@noble/post-quantum/ml-kem.js';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const MAIN_AUTH_PROTOCOL = process.env.REACT_APP_AUTH_PROTOCOL || 'split-verifier';
+const MAIN_TRANSPORT_PROTOCOL = process.env.REACT_APP_TRANSPORT_PROTOCOL || 'hybrid_pqc';
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'pqc_access_token';
 const REFRESH_TOKEN_KEY = 'pqc_refresh_token';
 const TOKEN_EXPIRY_KEY = 'pqc_token_expiry';
 const CSRF_TOKEN_KEY = 'pqc_csrf_token';
-const TRANSPORT_CONTEXT = 'pqc-hybrid-transport-v1';
+const TRANSPORT_KDF_CONTEXTS = {
+  hybrid_pqc: 'pqc-hybrid-transport-v1',
+  classical_ecdh: 'classical-ecdh-transport-v1'
+};
 const TRANSPORT_SESSION_SKEW_MS = 15000;
 
 let transportSession = null;
@@ -64,9 +69,15 @@ const clearTransportSession = () => {
   transportSession = null;
 };
 
-const deriveHybridTransportKey = async (pqcSecretBytes, ecdhSecretBytes) => {
-  const contextBytes = new TextEncoder().encode(TRANSPORT_CONTEXT);
-  const input = concatBytes(pqcSecretBytes, ecdhSecretBytes);
+const deriveTransportKey = async ({ protocol, pqcSecretBytes, ecdhSecretBytes }) => {
+  const contextLabel = TRANSPORT_KDF_CONTEXTS[protocol];
+  if (!contextLabel) {
+    throw new Error(`Unsupported transport protocol: ${protocol}`);
+  }
+  const contextBytes = new TextEncoder().encode(contextLabel);
+  const input = protocol === 'hybrid_pqc'
+    ? concatBytes(pqcSecretBytes, ecdhSecretBytes)
+    : concatBytes(ecdhSecretBytes);
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
     input,
@@ -131,7 +142,6 @@ const ensureTransportSession = async () => {
     return transportSession;
   }
 
-  const clientPqcKeyPair = ml_kem1024.keygen();
   const clientEcdhKeys = await crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
     true,
@@ -141,18 +151,34 @@ const ensureTransportSession = async () => {
     await crypto.subtle.exportKey('raw', clientEcdhKeys.publicKey)
   );
 
-  const response = await api.post('/transport/init', {
-    clientPqcPublicKey: bytesToBase64(clientPqcKeyPair.publicKey),
+  const requestBody = {
+    protocol: MAIN_TRANSPORT_PROTOCOL,
     clientEcdhPublicKey: bytesToBase64(clientEcdhPublicRaw)
-  });
+  };
+  let clientPqcKeyPair = null;
+  if (MAIN_TRANSPORT_PROTOCOL === 'hybrid_pqc') {
+    clientPqcKeyPair = ml_kem1024.keygen();
+    requestBody.clientPqcPublicKey = bytesToBase64(clientPqcKeyPair.publicKey);
+  }
+
+  const response = await api.post('/transport/init', requestBody);
 
   if (!response.data?.success) {
     throw new Error(response.data?.error || 'Failed to initialize hybrid transport session');
   }
 
+  if (response.data?.protocol !== MAIN_TRANSPORT_PROTOCOL) {
+    throw new Error(
+      `Transport protocol mismatch. Expected ${MAIN_TRANSPORT_PROTOCOL}, got ${response.data?.protocol || 'unknown'}`
+    );
+  }
+
   const serverEcdhPublicRaw = base64ToBytes(response.data.serverEcdhPublicKey || '');
-  const pqcCiphertext = base64ToBytes(response.data.pqcCiphertext || '');
-  const pqcSharedSecret = ml_kem1024.decapsulate(pqcCiphertext, clientPqcKeyPair.secretKey);
+  let pqcSharedSecret = new Uint8Array([]);
+  if (MAIN_TRANSPORT_PROTOCOL === 'hybrid_pqc') {
+    const pqcCiphertext = base64ToBytes(response.data.pqcCiphertext || '');
+    pqcSharedSecret = ml_kem1024.decapsulate(pqcCiphertext, clientPqcKeyPair.secretKey);
+  }
 
   const serverEcdhPublicKey = await crypto.subtle.importKey(
     'raw',
@@ -169,12 +195,14 @@ const ensureTransportSession = async () => {
     )
   );
 
-  const transportKey = await deriveHybridTransportKey(
-    new Uint8Array(pqcSharedSecret),
-    ecdhBits
-  );
+  const transportKey = await deriveTransportKey({
+    protocol: MAIN_TRANSPORT_PROTOCOL,
+    pqcSecretBytes: new Uint8Array(pqcSharedSecret),
+    ecdhSecretBytes: ecdhBits
+  });
   transportSession = {
     sessionId: response.data.sessionId,
+    protocol: MAIN_TRANSPORT_PROTOCOL,
     transportKeyBytes: transportKey,
     expiresAt: Date.now() + ((response.data.expiresIn || 900) * 1000)
   };
@@ -419,7 +447,8 @@ export const authAPI = {
     const response = await api.post('/auth/register', {
       username,
       salt,
-      passwordVerifier
+      passwordVerifier,
+      authProtocol: MAIN_AUTH_PROTOCOL
     });
     return response.data;
   },
@@ -431,7 +460,8 @@ export const authAPI = {
    */
   getLoginChallenge: async (username) => {
     const response = await api.post('/auth/login/challenge', {
-      username
+      username,
+      authProtocol: MAIN_AUTH_PROTOCOL
     });
     return response.data;
   },
@@ -447,7 +477,8 @@ export const authAPI = {
     const response = await api.post('/auth/login', {
       username,
       challengeId,
-      challengeResponse
+      challengeResponse,
+      authProtocol: MAIN_AUTH_PROTOCOL
     });
     
     if (response.data.success) {
@@ -494,6 +525,24 @@ export const authAPI = {
     } finally {
       handleLogout();
     }
+  }
+};
+
+// ============================================
+// Benchmark APIs
+// ============================================
+export const benchmarkAPI = {
+  getProtocols: async () => {
+    const response = await api.get('/benchmark/protocols');
+    return response.data;
+  },
+
+  run: async ({ iterations = 3, payloadSize = 1024 } = {}) => {
+    const response = await api.post('/benchmark/run', {
+      iterations,
+      payloadSize
+    });
+    return response.data;
   }
 };
 

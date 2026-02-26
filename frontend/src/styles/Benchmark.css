@@ -1,0 +1,83 @@
+.benchmark-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.benchmark-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  background: rgba(10, 20, 30, 0.05);
+  border: 1px solid rgba(10, 20, 30, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.control-group input {
+  min-width: 150px;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #b7c4d4;
+}
+
+.run-benchmark-button {
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: #0d5cab;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.run-benchmark-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.protocol-summary {
+  background: rgba(13, 92, 171, 0.08);
+  border: 1px solid rgba(13, 92, 171, 0.2);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+}
+
+.benchmark-results {
+  display: grid;
+  gap: 1rem;
+}
+
+.result-card {
+  border: 1px solid rgba(10, 20, 30, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.result-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.8rem;
+}
+
+.result-card th,
+.result-card td {
+  text-align: left;
+  padding: 0.45rem;
+  border-bottom: 1px solid rgba(10, 20, 30, 0.1);
+}
+
+.best-result {
+  margin: 0.2rem 0 0.4rem;
+  color: #0d5cab;
+  font-weight: 600;
+}
+

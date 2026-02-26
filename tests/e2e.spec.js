@@ -121,4 +121,25 @@ test.describe('PQC Password Manager E2E Tests', () => {
       await expect(page.locator('text=Unlock Vault')).toBeVisible({ timeout: 5000 });
     }
   });
+
+  test('should run benchmark comparison for auth and transport', async ({ page }) => {
+    const uniqueUser = `bench_${Date.now()}`;
+    const strongPassword = 'BenchP@ssword123!';
+
+    await page.click('text=Create New Vault');
+    await page.waitForSelector('#username');
+    await page.fill('#username', uniqueUser);
+    await page.fill('#password', strongPassword);
+    await page.fill('#confirm-password', strongPassword);
+    await page.click('button:has-text(\"Create Vault\")');
+
+    await page.waitForSelector('[data-testid=\"nav-benchmark\"]', { timeout: 15000 });
+    await page.click('[data-testid=\"nav-benchmark\"]');
+    await page.click('[data-testid=\"run-benchmarks\"]');
+
+    await expect(page.locator('[data-testid=\"auth-row-main_split_verifier\"]')).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('[data-testid=\"auth-row-opaque_baseline_sim\"]')).toBeVisible();
+    await expect(page.locator('[data-testid=\"transport-row-main_hybrid_pqc\"]')).toBeVisible();
+    await expect(page.locator('[data-testid=\"transport-row-classical_ecdh_sim\"]')).toBeVisible();
+  });
 });

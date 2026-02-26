@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
 import time
 import uuid
@@ -26,6 +27,18 @@ from utils.crypto import kyber_encapsulate
 TRANSPORT_SESSION_TTL_SECONDS = 15 * 60
 MAX_TRACKED_TRANSPORT_SESSIONS = 10000
 HYBRID_KDF_INFO = b"pqc-hybrid-transport-v1"
+CLASSICAL_KDF_INFO = b"classical-ecdh-transport-v1"
+
+TRANSPORT_PROTOCOL_HYBRID_PQC = "hybrid_pqc"
+TRANSPORT_PROTOCOL_CLASSICAL_ECDH = "classical_ecdh"
+SUPPORTED_TRANSPORT_PROTOCOLS = {
+    TRANSPORT_PROTOCOL_HYBRID_PQC,
+    TRANSPORT_PROTOCOL_CLASSICAL_ECDH,
+}
+DEFAULT_TRANSPORT_PROTOCOL = (
+    os.environ.get("TRANSPORT_PROTOCOL_MAIN", TRANSPORT_PROTOCOL_HYBRID_PQC)
+    or TRANSPORT_PROTOCOL_HYBRID_PQC
+).strip()
 
 
 class TransportError(Exception):
@@ -65,6 +78,18 @@ def _derive_hybrid_session_key(pqc_shared_secret: bytes, ecdh_shared_secret: byt
     return hkdf.derive(pqc_shared_secret + ecdh_shared_secret)
 
 
+def _derive_classical_session_key(ecdh_shared_secret: bytes) -> bytes:
+    if not ecdh_shared_secret:
+        raise TransportError("Classical key agreement failed", 500)
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=CLASSICAL_KDF_INFO,
+    )
+    return hkdf.derive(ecdh_shared_secret)
+
+
 def _cleanup_transport_sessions(now: float) -> None:
     expired_ids = [
         session_id
@@ -90,13 +115,23 @@ def _validate_pqc_available() -> None:
         raise TransportError("PQC transport is currently unavailable", 503)
 
 
+def normalize_transport_protocol(protocol: str | None) -> str:
+    selected = (protocol or DEFAULT_TRANSPORT_PROTOCOL).strip()
+    if selected not in SUPPORTED_TRANSPORT_PROTOCOLS:
+        raise TransportError(f"Unsupported transport protocol: {selected}", 400)
+    return selected
+
+
 def create_transport_session(
     *,
     user_id: str,
-    client_pqc_public_key_b64: str,
+    client_pqc_public_key_b64: str | None,
     client_ecdh_public_key_b64: str,
+    protocol: str | None = None,
 ) -> Dict[str, Any]:
-    _validate_pqc_available()
+    selected_protocol = normalize_transport_protocol(protocol)
+    if selected_protocol == TRANSPORT_PROTOCOL_HYBRID_PQC:
+        _validate_pqc_available()
 
     client_ecdh_public_key_bytes = _b64d(client_ecdh_public_key_b64, field_name="Client ECDH public key")
     if len(client_ecdh_public_key_bytes) < 33:
@@ -110,20 +145,28 @@ def create_transport_session(
     except Exception as exc:
         raise TransportError("Client ECDH public key is invalid", 400) from exc
 
-    try:
-        kem_ciphertext_b64, pqc_shared_secret_b64 = kyber_encapsulate(client_pqc_public_key_b64)
-    except Exception as exc:
-        raise TransportError(f"ML-KEM encapsulation failed: {exc}", 500) from exc
-
     server_ecdh_private_key = ec.generate_private_key(ec.SECP256R1())
     ecdh_shared_secret = server_ecdh_private_key.exchange(ec.ECDH(), client_ecdh_public_key)
-    pqc_shared_secret = _b64d(pqc_shared_secret_b64, field_name="PQC shared secret")
-
-    session_key = _derive_hybrid_session_key(pqc_shared_secret, ecdh_shared_secret)
     server_ecdh_public_key_bytes = server_ecdh_private_key.public_key().public_bytes(
         encoding=serialization.Encoding.X962,
         format=serialization.PublicFormat.UncompressedPoint,
     )
+
+    kem_ciphertext_b64: str | None = None
+    if selected_protocol == TRANSPORT_PROTOCOL_HYBRID_PQC:
+        client_pqc_public_key = (client_pqc_public_key_b64 or "").strip()
+        if not client_pqc_public_key:
+            raise TransportError("Client PQC public key is required", 400)
+        try:
+            kem_ciphertext_b64, pqc_shared_secret_b64 = kyber_encapsulate(client_pqc_public_key)
+        except Exception as exc:
+            raise TransportError(f"ML-KEM encapsulation failed: {exc}", 500) from exc
+        pqc_shared_secret = _b64d(pqc_shared_secret_b64, field_name="PQC shared secret")
+        session_key = _derive_hybrid_session_key(pqc_shared_secret, ecdh_shared_secret)
+        algorithm = "ML-KEM-1024+ECDH-P256+HKDF-SHA256+AES-256-GCM"
+    else:
+        session_key = _derive_classical_session_key(ecdh_shared_secret)
+        algorithm = "ECDH-P256+HKDF-SHA256+AES-256-GCM"
 
     now = time.time()
     _cleanup_transport_sessions(now)
@@ -133,7 +176,8 @@ def create_transport_session(
         "key_b64": _b64e(session_key),
         "created_at": now,
         "expires_at": now + TRANSPORT_SESSION_TTL_SECONDS,
-        "algorithm": "ML-KEM-1024+ECDH-P256+HKDF-SHA256+AES-256-GCM",
+        "algorithm": algorithm,
+        "protocol": selected_protocol,
     }
 
     return {
@@ -141,7 +185,8 @@ def create_transport_session(
         "server_ecdh_public_key": _b64e(server_ecdh_public_key_bytes),
         "pqc_ciphertext": kem_ciphertext_b64,
         "expires_in": TRANSPORT_SESSION_TTL_SECONDS,
-        "algorithm": "ML-KEM-1024+ECDH-P256+HKDF-SHA256+AES-256-GCM",
+        "algorithm": algorithm,
+        "protocol": selected_protocol,
     }
 
 

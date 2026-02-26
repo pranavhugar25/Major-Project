@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
 import re
 import secrets
 import time
@@ -46,6 +47,7 @@ login_challenges: Dict[str, Dict[str, str | float]] = {}
 
 AUTH_VERIFIER_ENC_PREFIX = "encv1"
 AUTH_VERIFIER_ENC_CONTEXT = b"auth-verifier-storage-v1"
+AUTH_PROTOCOL_MAIN = (os.environ.get("AUTH_PROTOCOL_MAIN", "split-verifier") or "split-verifier").strip()
 
 
 def _client_ip() -> str:
@@ -239,10 +241,23 @@ def _compute_expected_challenge_response(stored_verifier_b64: str, challenge_b64
     return base64.b64encode(digest).decode("utf-8")
 
 
+def _validate_requested_auth_protocol(data: Dict[str, object]) -> str | None:
+    requested = str(data.get("authProtocol") or "").strip()
+    if requested and requested != AUTH_PROTOCOL_MAIN:
+        return (
+            f"Unsupported auth protocol for main flow. "
+            f"Configured protocol: {AUTH_PROTOCOL_MAIN}"
+        )
+    return None
+
+
 @auth_bp.route("/register", methods=["POST"])
 def register():
     try:
         data = request.get_json(silent=True) or {}
+        protocol_error = _validate_requested_auth_protocol(data)
+        if protocol_error:
+            return jsonify({"success": False, "error": protocol_error}), 400
         username = (data.get("username") or "").strip()
         password_verifier = (data.get("passwordVerifier") or "").strip()
         salt = (data.get("salt") or "").strip()
@@ -292,7 +307,7 @@ def register():
             user_id=str(new_user.user_id),
             username=username,
             ip_address=ip_addr,
-            details={"auth_protocol": "split-verifier"},
+            details={"auth_protocol": AUTH_PROTOCOL_MAIN},
         )
 
         return (
@@ -303,7 +318,7 @@ def register():
                     "userId": str(new_user.user_id),
                     "salt": salt,
                     "username": username,
-                    "authProtocol": "split-verifier",
+                    "authProtocol": AUTH_PROTOCOL_MAIN,
                 }
             ),
             201,
@@ -318,6 +333,9 @@ def register():
 def login_challenge():
     try:
         data = request.get_json(silent=True) or {}
+        protocol_error = _validate_requested_auth_protocol(data)
+        if protocol_error:
+            return jsonify({"success": False, "error": protocol_error}), 400
         username = (data.get("username") or "").strip()
         ip_addr = _client_ip()
         now = time.time()
@@ -368,7 +386,7 @@ def login_challenge():
             username=username,
             ip_address=ip_addr,
         )
-        return jsonify({"success": True, **challenge}), 200
+        return jsonify({"success": True, **challenge, "authProtocol": AUTH_PROTOCOL_MAIN}), 200
     except Exception:
         logger.exception("Login challenge failed")
         return jsonify({"success": False, "error": "Login challenge failed. Please try again."}), 500
@@ -378,6 +396,9 @@ def login_challenge():
 def login():
     try:
         data = request.get_json(silent=True) or {}
+        protocol_error = _validate_requested_auth_protocol(data)
+        if protocol_error:
+            return jsonify({"success": False, "error": protocol_error}), 400
         username = (data.get("username") or "").strip()
         challenge_id = (data.get("challengeId") or "").strip()
         challenge_response = (data.get("challengeResponse") or "").strip()
@@ -487,7 +508,7 @@ def login():
             user_id=str(user.user_id),
             username=user.username,
             ip_address=ip_addr,
-            details={"auth_protocol": "challenge-response-split-verifier"},
+            details={"auth_protocol": f"challenge-response-{AUTH_PROTOCOL_MAIN}"},
         )
 
         return (
@@ -503,6 +524,7 @@ def login():
                     "csrf_token": tokens["csrf_token"],
                     "token_type": tokens["token_type"],
                     "expires_in": tokens["expires_in"],
+                    "authProtocol": AUTH_PROTOCOL_MAIN,
                 }
             ),
             200,

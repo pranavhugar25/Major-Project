@@ -16,6 +16,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-prod}
       - DATABASE_URL=sqlite:///pqc_password_manager.db
       - RATELIMIT_STORAGE_URL=memory://
+      - AUTH_PROTOCOL_MAIN=${AUTH_PROTOCOL_MAIN:-split-verifier}
+      - TRANSPORT_PROTOCOL_MAIN=${TRANSPORT_PROTOCOL_MAIN:-hybrid_pqc}
       - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
       - LD_LIBRARY_PATH=/usr/local/lib
       - PYTHONUNBUFFERED=1
@@ -43,8 +45,10 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:5000/api
+      - REACT_APP_AUTH_PROTOCOL=${AUTH_PROTOCOL_MAIN:-split-verifier}
+      - REACT_APP_TRANSPORT_PROTOCOL=${TRANSPORT_PROTOCOL_MAIN:-hybrid_pqc}
     working_dir: /app/frontend
-    command: npm start
+    command: sh -c "npm install --no-audit --no-fund && npm start"
     depends_on:
       backend:
         condition: service_healthy

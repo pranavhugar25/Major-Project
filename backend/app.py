@@ -15,6 +15,7 @@ from flask_limiter.util import get_remote_address
 
 from models.database import db
 from routes.auth import auth_bp
+from routes.benchmark import benchmark_bp
 from routes.passwords import passwords_bp
 from routes.transport import transport_bp
 
@@ -62,6 +63,8 @@ def _apply_endpoint_rate_limits(app: Flask, limiter: Limiter) -> None:
         "auth.refresh": "10 per 15 minute",
         "auth.logout": "10 per 15 minute",
         "transport.init_transport_session": "30 per 15 minute",
+        "benchmark.get_benchmark_protocols": "60 per hour",
+        "benchmark.run_benchmarks": "20 per hour",
         "passwords.add_password": "60 per hour",
         "passwords.get_all_passwords": "120 per hour",
         "passwords.delete_password": "60 per hour",
@@ -106,6 +109,7 @@ def create_app(testing: bool = False) -> Flask:
     db.init_app(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(transport_bp)
+    app.register_blueprint(benchmark_bp)
     app.register_blueprint(passwords_bp)
 
     limiter = Limiter(
@@ -157,6 +161,11 @@ def create_app(testing: bool = False) -> Flask:
                         "rate_limiting": True,
                         "csrf_protection": True,
                         "hybrid_transport": True,
+                        "auth_protocol_main": os.environ.get("AUTH_PROTOCOL_MAIN", "split-verifier"),
+                        "transport_protocol_main": os.environ.get(
+                            "TRANSPORT_PROTOCOL_MAIN",
+                            "hybrid_pqc",
+                        ),
                     },
                 }
             ),
@@ -193,6 +202,10 @@ def create_app(testing: bool = False) -> Flask:
                         },
                         "transport": {
                             "init": "/api/transport/init",
+                        },
+                        "benchmark": {
+                            "protocols": "/api/benchmark/protocols",
+                            "run": "/api/benchmark/run",
                         },
                         "passwords": {
                             "add": "/api/passwords/add",

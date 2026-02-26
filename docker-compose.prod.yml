@@ -16,6 +16,8 @@ services:
       - FLASK_DEBUG=false
       - SECRET_KEY=${SECRET_KEY}
       - RATELIMIT_STORAGE_URL=memory://
+      - AUTH_PROTOCOL_MAIN=${AUTH_PROTOCOL_MAIN:-split-verifier}
+      - TRANSPORT_PROTOCOL_MAIN=${TRANSPORT_PROTOCOL_MAIN:-hybrid_pqc}
       - CORS_ORIGINS=http://localhost:8080
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:5000/api/health', timeout=5); sys.exit(0)"]
