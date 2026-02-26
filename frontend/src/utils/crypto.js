@@ -55,55 +55,97 @@ export const generateSalt = (length = 32) => {
  * @param {string} salt - Base64 encoded salt
  * @returns {Promise<string>} Base64 encoded vault key
  */
-export const deriveVaultKey = async (masterPassword, salt) => {
+const PBKDF2_ITERATIONS = 600000;
+const VAULT_DERIVATION_CONTEXT = 'vault-key-v1';
+const AUTH_DERIVATION_CONTEXT = 'auth-verifier-v1';
+
+const buildContextualSalt = async (saltBytes, contextLabel) => {
+  const contextBytes = new TextEncoder().encode(contextLabel);
+  const combined = new Uint8Array(contextBytes.length + saltBytes.length);
+  combined.set(contextBytes, 0);
+  combined.set(saltBytes, contextBytes.length);
+  const digest = await crypto.subtle.digest('SHA-256', combined);
+  secureZeroize(combined);
+  return new Uint8Array(digest);
+};
+
+const deriveContextualSecret = async (masterPassword, salt, contextLabel) => {
   try {
-    // Decode salt from base64
     const saltBytes = Uint8Array.from(atob(salt), c => c.charCodeAt(0));
+    const contextualSalt = await buildContextualSalt(saltBytes, contextLabel);
+    secureZeroize(saltBytes);
+    const passwordBytes = new TextEncoder().encode(masterPassword);
     
-    // Import master password as key material
     const keyMaterial = await crypto.subtle.importKey(
       'raw',
-      new TextEncoder().encode(masterPassword),
+      passwordBytes,
       'PBKDF2',
       false,
-      ['deriveBits', 'deriveKey']
+      ['deriveBits']
     );
+    secureZeroize(passwordBytes);
     
-    // Derive 256-bit key using PBKDF2 with 600,000 iterations
-    // Set extractable: true so we can export the key for use
-    const vaultKey = await crypto.subtle.deriveKey(
+    const derivedBits = await crypto.subtle.deriveBits(
       {
         name: 'PBKDF2',
-        salt: saltBytes,
-        iterations: 600000,
+        salt: contextualSalt,
+        iterations: PBKDF2_ITERATIONS,
         hash: 'SHA-256'
       },
       keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      true,
-      ['encrypt', 'decrypt']
+      256
     );
+    secureZeroize(contextualSalt);
     
-    // Export key as base64
-    const exportedKey = await crypto.subtle.exportKey('raw', vaultKey);
-    return btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
+    const derivedBytes = new Uint8Array(derivedBits);
+    const encoded = btoa(String.fromCharCode(...derivedBytes));
+    secureZeroize(derivedBytes);
+    return encoded;
   } catch (error) {
     console.error('Cryptographic operation failed:', error);
-    throw new Error('Failed to derive vault key: ' + error.message);
+    throw new Error('Failed to derive secret material: ' + error.message);
   }
 };
 
 /**
- * Create a login challenge-response proof from a derived vault key.
- * Uses HMAC-SHA256 where key=vaultKey and message=challenge bytes.
+ * Derive the vault encryption key from the master password.
  *
- * @param {string} vaultKeyBase64 - Base64 encoded derived vault key
+ * Uses context-separated PBKDF2 derivation to keep encryption and auth
+ * secret material independent.
+ *
+ * @param {string} masterPassword - User's master password
+ * @param {string} salt - Base64 encoded salt
+ * @returns {Promise<string>} Base64 encoded vault key
+ */
+export const deriveVaultKey = async (masterPassword, salt) => {
+  return deriveContextualSecret(masterPassword, salt, VAULT_DERIVATION_CONTEXT);
+};
+
+/**
+ * Derive an authentication verifier from the master password.
+ *
+ * This value is used only for authentication proof generation and is
+ * intentionally separated from the vault encryption key material.
+ *
+ * @param {string} masterPassword - User's master password
+ * @param {string} salt - Base64 encoded salt
+ * @returns {Promise<string>} Base64 encoded auth verifier
+ */
+export const deriveAuthVerifier = async (masterPassword, salt) => {
+  return deriveContextualSecret(masterPassword, salt, AUTH_DERIVATION_CONTEXT);
+};
+
+/**
+ * Create a login challenge-response proof from the auth verifier.
+ * Uses HMAC-SHA256 where key=authVerifier and message=challenge bytes.
+ *
+ * @param {string} authVerifierBase64 - Base64 encoded auth verifier
  * @param {string} challengeBase64 - Base64 encoded one-time challenge
  * @returns {Promise<string>} Base64 encoded HMAC proof
  */
-export const createChallengeResponse = async (vaultKeyBase64, challengeBase64) => {
+export const createChallengeResponse = async (authVerifierBase64, challengeBase64) => {
   try {
-    const keyBytes = Uint8Array.from(atob(vaultKeyBase64), c => c.charCodeAt(0));
+    const keyBytes = Uint8Array.from(atob(authVerifierBase64), c => c.charCodeAt(0));
     const challengeBytes = Uint8Array.from(atob(challengeBase64), c => c.charCodeAt(0));
 
     const hmacKey = await crypto.subtle.importKey(

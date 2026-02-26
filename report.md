@@ -8,25 +8,25 @@ Scope: Current backend, frontend, Docker deployment artifacts, and architecture/
 The implementation has improved in important areas (challenge-response login, active PQC integration, hybrid transport support), but several high-impact security flaws and operational gaps remain.
 
 Most severe issue:
-- The server currently stores a verifier that is effectively the same key used to decrypt the vault payloads. A DB leak can enable direct account impersonation and offline vault decryption.
+- Authentication still uses a non-PAKE verifier challenge-response model. Split derivation and encrypted verifier storage improved DB-leak resistance, but server-side reusable auth material remains.
 
 ## Findings (Priority Order)
 
-## 1) Critical: Stored verifier is equivalent to vault decryption key
+## 1) Critical: Verifier-based challenge-response remains non-PAKE (partial mitigation applied)
 Evidence:
-- `frontend/src/components/Register.js:44` derives `passwordVerifier` via `deriveVaultKey`.
-- `backend/routes/auth.py:229` stores `master_password_hash=password_verifier`.
-- `backend/routes/auth.py:395` uses stored verifier directly for login proof verification.
-- `frontend/src/utils/crypto.js:58` defines `deriveVaultKey` used for vault encryption/decryption key material.
+- `frontend/src/components/Register.js:45` derives `passwordVerifier` via `deriveAuthVerifier`.
+- `frontend/src/utils/crypto.js:121` derives vault key with a separate derivation context.
+- `backend/routes/auth.py:283` stores encrypted verifier material (`master_password_hash=_encrypt_auth_verifier(...)`).
+- `backend/routes/auth.py:449` decrypts stored verifier for challenge-response verification.
 
 Impact:
-- Database compromise can allow direct login proof generation (no password cracking required).
-- Same leaked verifier can decrypt stored vault ciphertexts offline.
-- Zero-knowledge claim is effectively broken.
+- Mitigated versus prior state: DB-only compromise no longer directly exposes a vault-key-equivalent verifier.
+- Remaining risk: this is still a verifier-based scheme rather than PAKE; compromise of app secret and DB can recover verifier material and permit impersonation.
+- Server-side recoverable auth material weakens zero-knowledge authentication assurances versus OPAQUE/SRP-style designs.
 
 Recommendation:
-- Replace current verifier scheme with a real PAKE/SRP/OPAQUE-like design where server-stored material is not a reusable authenticator and not a vault key equivalent.
-- Split authentication secret from vault encryption key derivation path.
+- Replace verifier challenge-response with a PAKE/SRP/OPAQUE-like design where server-stored material is not a reusable authenticator.
+- Until PAKE is implemented, treat `SECRET_KEY` as a high-value secret (strong generation, rotation process, and restricted access).
 
 ## 2) Critical: Auth tokens and CSRF token stored in `sessionStorage`
 Evidence:
@@ -101,8 +101,8 @@ Recommendation:
 
 ## 7) Medium: Username/account enumeration still possible
 Evidence:
-- `backend/routes/auth.py:224` registration returns explicit duplicate username message.
-- `backend/routes/auth.py:305` and `backend/routes/auth.py:307` login challenge behavior differs for unknown user.
+- `backend/routes/auth.py:278` registration returns explicit duplicate username message.
+- `backend/routes/auth.py:359` and `backend/routes/auth.py:361` login challenge behavior differs for unknown user.
 
 Impact:
 - Attackers can enumerate valid accounts and focus credential attacks.

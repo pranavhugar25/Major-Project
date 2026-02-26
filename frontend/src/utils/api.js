@@ -440,7 +440,7 @@ export const authAPI = {
    * Login user using challenge-response proof - returns JWT tokens
    * @param {string} username - Username
    * @param {string} challengeId - One-time challenge ID
-   * @param {string} challengeResponse - HMAC proof derived from vault key
+   * @param {string} challengeResponse - HMAC proof derived from auth verifier
    * @returns {Promise<object>} Response with tokens, userId, and salt
    */
   login: async (username, challengeId, challengeResponse) => {

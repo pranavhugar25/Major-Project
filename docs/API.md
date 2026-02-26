@@ -15,7 +15,7 @@ Register a new user account.
 {
   "username": "user@example.com",
   "salt": "base64_encoded_32_byte_salt",
-  "passwordVerifier": "base64_pbkdf2_verifier"
+  "passwordVerifier": "base64_auth_verifier"
 }
 ```
 
@@ -26,7 +26,8 @@ Register a new user account.
   "message": "User registered successfully",
   "userId": "550e8400-e29b-41d4-a716-446655440000",
   "salt": "base64_encoded_salt",
-  "username": "user@example.com"
+  "username": "user@example.com",
+  "authProtocol": "split-verifier"
 }
 ```
 
@@ -40,6 +41,11 @@ Register a new user account.
 
 ---
 
+Compatibility note:
+- This version expects encrypted verifier storage format in the backend and does not include legacy plaintext-verifier migration support.
+
+---
+
 ### POST /auth/login
 Complete challenge-response login and retrieve tokens.
 
@@ -48,7 +54,7 @@ Complete challenge-response login and retrieve tokens.
 {
   "username": "user@example.com",
   "challengeId": "f6fd20d9-8b08-4b6d-b095-5ea81717065f",
-  "challengeResponse": "base64_hmac_sha256_proof"
+  "challengeResponse": "base64_hmac_sha256_proof_using_auth_verifier"
 }
 ```
 
@@ -277,9 +283,10 @@ Check if the API is running.
 ### Zero-Knowledge Architecture
 - Master password is **never** sent to the backend
 - Vault key is derived client-side using PBKDF2 with 600,000 iterations
-- Login uses challenge-response proof (HMAC-SHA256 over a one-time challenge)
+- Authentication verifier is derived client-side with separate context material
+- Login uses challenge-response proof (HMAC-SHA256 over a one-time challenge using auth verifier)
 - All password encryption/decryption happens in the browser
-- Server only stores encrypted ciphertext and authentication metadata
+- Server stores encrypted ciphertext and encrypted authentication metadata
 - Password API payloads use hybrid transport sessions (ML-KEM + ECDH + AES-GCM) in addition to TLS
 
 ### Encryption Details

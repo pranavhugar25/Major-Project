@@ -30,7 +30,7 @@ The PQC Password Manager implements a **Zero-Knowledge Architecture** with **Pos
 │                           ↕                                  │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Database (SQLite/PostgreSQL)                          │ │
-│  │  • Users (hashed passwords, salts)                     │ │
+│  │  • Users (encrypted auth verifiers, salts)                     │ │
 │  │  • Encrypted password entries                          │ │
 │  │  • PQC-wrapped password envelopes                      │ │
 │  └────────────────────────────────────────────────────────┘ │
@@ -49,15 +49,15 @@ User                    Client                    Server
   │                       │                         │
   │                       │ Generate salt           │
   │                       │ Derive vault key (PBKDF2)
-  │                       │ Hash master password    │
+  │                       │ Derive auth verifier    │
   │                       │                         │
   │                       │ POST /auth/register     │
-  │                       │ {username, hash}        │
+  │                       │ {username, salt, verifier}        │
   │                       ├────────────────────────>│
   │                       │                         │
   │                       │                         │ Store user
   │                       │                         │ Store salt
-  │                       │                         │ Store hash
+  │                       │                         │ Store encrypted verifier
   │                       │                         │
   │                       │ ← {userId, salt}        │
   │                       │<────────────────────────┤
@@ -141,7 +141,8 @@ User                    Client                    Server
 - **Certificate Pinning** (production recommendation)
 
 ### Layer 4: Server-Side Protection
-- **Password Hashing:** PBKDF2-SHA256 (600k iterations)
+- **Context-Separated Derivation:** Client derives vault key and auth verifier with separate PBKDF2 contexts
+- **Verifier Storage:** Auth verifier is AES-GCM encrypted before persistence
 - **Unique Salts:** 256-bit random per user
 - **No Plain Text Storage:** Master passwords never stored
 - **Database Encryption:** Encrypted at rest (production)
@@ -153,7 +154,7 @@ User                    Client                    Server
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
-    master_password_hash VARCHAR(512) NOT NULL,
+    master_password_hash VARCHAR(1024) NOT NULL, -- legacy column name; stores encrypted auth verifier
     salt VARCHAR(512) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -254,3 +255,4 @@ Transport session state for hybrid payload encryption is ephemeral and stored in
    - Role-based access
    - Audit logs
    - Compliance reporting
+

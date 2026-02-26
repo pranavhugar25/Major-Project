@@ -13,7 +13,8 @@ import time
 import uuid
 from typing import Dict
 
-from flask import Blueprint, jsonify, request
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from flask import Blueprint, current_app, jsonify, request
 
 from models.database import User, db
 from utils.audit import log_security_event
@@ -42,6 +43,9 @@ MAX_TRACKED_CHALLENGES = 5000
 # key: "<ip>:<username-lower>"
 failed_login_attempts: Dict[str, Dict[str, float]] = {}
 login_challenges: Dict[str, Dict[str, str | float]] = {}
+
+AUTH_VERIFIER_ENC_PREFIX = "encv1"
+AUTH_VERIFIER_ENC_CONTEXT = b"auth-verifier-storage-v1"
 
 
 def _client_ip() -> str:
@@ -114,6 +118,56 @@ def _decode_base64_field(value: str, field_name: str) -> bytes:
         return base64.b64decode(value.encode("utf-8"), validate=True)
     except Exception as exc:
         raise ValueError(f"{field_name} must be valid base64") from exc
+
+
+def _validate_verifier_length(verifier_bytes: bytes) -> None:
+    if len(verifier_bytes) != 32:
+        raise ValueError("Password verifier must be 32 bytes")
+
+
+def _derive_auth_storage_key() -> bytes:
+    secret_key = str(current_app.config.get("SECRET_KEY") or "").encode("utf-8")
+    if len(secret_key) < 16:
+        raise ValueError("Server secret key is not configured securely")
+    return hashlib.sha256(AUTH_VERIFIER_ENC_CONTEXT + secret_key).digest()
+
+
+def _encrypt_auth_verifier(verifier_b64: str) -> str:
+    verifier_bytes = _decode_base64_field(verifier_b64, "Password verifier")
+    _validate_verifier_length(verifier_bytes)
+
+    iv = secrets.token_bytes(12)
+    ciphertext = AESGCM(_derive_auth_storage_key()).encrypt(iv, verifier_b64.encode("utf-8"), None)
+    return (
+        f"{AUTH_VERIFIER_ENC_PREFIX}$"
+        f"{base64.b64encode(iv).decode('utf-8')}$"
+        f"{base64.b64encode(ciphertext).decode('utf-8')}"
+    )
+
+
+def _load_auth_verifier(stored_value: str) -> str:
+    if not isinstance(stored_value, str) or not stored_value.strip():
+        raise ValueError("Stored verifier is missing")
+
+    if not stored_value.startswith(f"{AUTH_VERIFIER_ENC_PREFIX}$"):
+        raise ValueError("Stored verifier format is invalid")
+
+    try:
+        _prefix, iv_b64, ciphertext_b64 = stored_value.split("$", 2)
+    except ValueError as exc:
+        raise ValueError("Stored verifier format is invalid") from exc
+
+    iv = _decode_base64_field(iv_b64, "Stored verifier IV")
+    ciphertext = _decode_base64_field(ciphertext_b64, "Stored verifier ciphertext")
+    try:
+        decrypted = AESGCM(_derive_auth_storage_key()).decrypt(iv, ciphertext, None)
+        verifier_b64 = decrypted.decode("utf-8")
+    except Exception as exc:
+        raise ValueError("Stored verifier cannot be decrypted") from exc
+
+    verifier_bytes = _decode_base64_field(verifier_b64, "Stored verifier")
+    _validate_verifier_length(verifier_bytes)
+    return verifier_b64
 
 
 def _validate_registration_fields(salt: str, password_verifier: str) -> str:
@@ -226,7 +280,7 @@ def register():
         new_user = User(
             user_id=str(uuid.uuid4()),
             username=username,
-            master_password_hash=password_verifier,
+            master_password_hash=_encrypt_auth_verifier(password_verifier),
             salt=salt,
         )
         db.session.add(new_user)
@@ -238,7 +292,7 @@ def register():
             user_id=str(new_user.user_id),
             username=username,
             ip_address=ip_addr,
-            details={"auth_protocol": "salted-verifier"},
+            details={"auth_protocol": "split-verifier"},
         )
 
         return (
@@ -249,7 +303,7 @@ def register():
                     "userId": str(new_user.user_id),
                     "salt": salt,
                     "username": username,
-                    "authProtocol": "salted-verifier",
+                    "authProtocol": "split-verifier",
                 }
             ),
             201,
@@ -392,7 +446,8 @@ def login():
             )
 
         try:
-            expected_response = _compute_expected_challenge_response(user.master_password_hash, challenge)
+            stored_verifier = _load_auth_verifier(user.master_password_hash)
+            expected_response = _compute_expected_challenge_response(stored_verifier, challenge)
         except ValueError:
             logger.warning("Corrupt verifier/challenge data for user=%s", user.username)
             return jsonify({"success": False, "error": "Authentication data is invalid"}), 500
@@ -432,7 +487,7 @@ def login():
             user_id=str(user.user_id),
             username=user.username,
             ip_address=ip_addr,
-            details={"auth_protocol": "challenge-response"},
+            details={"auth_protocol": "challenge-response-split-verifier"},
         )
 
         return (

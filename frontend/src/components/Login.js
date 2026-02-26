@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
-import { createChallengeResponse, deriveVaultKey } from '../utils/crypto';
+import { createChallengeResponse, deriveAuthVerifier, deriveVaultKey } from '../utils/crypto';
 import '../styles/Auth.css';
 
 function Login({ onLoginSuccess, onSwitchToRegister }) {
@@ -29,9 +29,10 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
         throw new Error(challengeData?.error || 'Failed to start login flow');
       }
 
-      // Step 2: Derive vault key and generate challenge response locally
+      // Step 2: Derive separate auth + vault material locally
       const vaultKey = await deriveVaultKey(masterPassword, salt);
-      const challengeResponse = await createChallengeResponse(vaultKey, challenge);
+      const authVerifier = await deriveAuthVerifier(masterPassword, salt);
+      const challengeResponse = await createChallengeResponse(authVerifier, challenge);
 
       // Step 3: Complete login with proof (never send master password)
       const response = await authAPI.login(username, challengeId, challengeResponse);
