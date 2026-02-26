@@ -16,6 +16,7 @@ from flask_limiter.util import get_remote_address
 from models.database import db
 from routes.auth import auth_bp
 from routes.passwords import passwords_bp
+from routes.transport import transport_bp
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,9 +57,11 @@ def _load_pqc_status() -> Dict[str, object]:
 def _apply_endpoint_rate_limits(app: Flask, limiter: Limiter) -> None:
     endpoint_limits = {
         "auth.register": "3 per 15 minute",
+        "auth.login_challenge": "20 per 15 minute",
         "auth.login": "5 per 15 minute",
         "auth.refresh": "10 per 15 minute",
         "auth.logout": "10 per 15 minute",
+        "transport.init_transport_session": "30 per 15 minute",
         "passwords.add_password": "60 per hour",
         "passwords.get_all_passwords": "120 per hour",
         "passwords.delete_password": "60 per hour",
@@ -102,6 +105,7 @@ def create_app(testing: bool = False) -> Flask:
 
     db.init_app(app)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(transport_bp)
     app.register_blueprint(passwords_bp)
 
     limiter = Limiter(
@@ -152,6 +156,7 @@ def create_app(testing: bool = False) -> Flask:
                         "jwt_enabled": True,
                         "rate_limiting": True,
                         "csrf_protection": True,
+                        "hybrid_transport": True,
                     },
                 }
             ),
@@ -180,10 +185,14 @@ def create_app(testing: bool = False) -> Flask:
                     "endpoints": {
                         "auth": {
                             "register": "/api/auth/register",
+                            "login_challenge": "/api/auth/login/challenge",
                             "login": "/api/auth/login",
                             "refresh": "/api/auth/refresh",
                             "verify": "/api/auth/verify",
                             "logout": "/api/auth/logout",
+                        },
+                        "transport": {
+                            "init": "/api/transport/init",
                         },
                         "passwords": {
                             "add": "/api/passwords/add",
@@ -200,6 +209,7 @@ def create_app(testing: bool = False) -> Flask:
                             f"Post-Quantum Cryptography: {pqc_info.get('kem_algorithm', 'N/A')}, "
                             f"{pqc_info.get('sig_algorithm', 'N/A')}"
                         ),
+                        "Hybrid PQC transport sessions (ML-KEM + ECDH + AES-GCM)",
                         "PBKDF2 key derivation (600k iterations)",
                         "JWT authentication (15-minute expiry)",
                         "Rate limiting",

@@ -4,6 +4,7 @@
   "description": "Zero-Knowledge Post-Quantum Cryptography Password Manager Frontend",
   "private": true,
   "dependencies": {
+    "@noble/post-quantum": "^0.5.4",
     "axios": "^1.8.2",
     "buffer": "^6.0.3",
     "crypto-js": "^4.2.0",

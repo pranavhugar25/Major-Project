@@ -15,6 +15,7 @@
  * For production, implement httpOnly cookies on the backend.
  */
 import axios from 'axios';
+import { ml_kem1024 } from '@noble/post-quantum/ml-kem.js';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -23,6 +24,10 @@ const ACCESS_TOKEN_KEY = 'pqc_access_token';
 const REFRESH_TOKEN_KEY = 'pqc_refresh_token';
 const TOKEN_EXPIRY_KEY = 'pqc_token_expiry';
 const CSRF_TOKEN_KEY = 'pqc_csrf_token';
+const TRANSPORT_CONTEXT = 'pqc-hybrid-transport-v1';
+const TRANSPORT_SESSION_SKEW_MS = 15000;
+
+let transportSession = null;
 
 // Create axios instance with default config
 const api = axios.create({
@@ -32,6 +37,180 @@ const api = axios.create({
   },
   timeout: 10000
 });
+
+const bytesToBase64 = (bytes) => {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+};
+
+const base64ToBytes = (value) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+
+const concatBytes = (...parts) => {
+  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+};
+
+const clearTransportSession = () => {
+  transportSession = null;
+};
+
+const deriveHybridTransportKey = async (pqcSecretBytes, ecdhSecretBytes) => {
+  const contextBytes = new TextEncoder().encode(TRANSPORT_CONTEXT);
+  const input = concatBytes(pqcSecretBytes, ecdhSecretBytes);
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    input,
+    'HKDF',
+    false,
+    ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array([]),
+      info: contextBytes
+    },
+    keyMaterial,
+    256
+  );
+  return new Uint8Array(bits);
+};
+
+const encryptTransportPayload = async (payload, transportKeyBytes) => {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    transportKeyBytes,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+  const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    plaintext
+  );
+  return {
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+};
+
+const decryptTransportPayload = async (transportEnvelope, transportKeyBytes) => {
+  const iv = base64ToBytes(transportEnvelope.iv || '');
+  const ciphertext = base64ToBytes(transportEnvelope.ciphertext || '');
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    transportKeyBytes,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    ciphertext
+  );
+  return JSON.parse(new TextDecoder().decode(decrypted));
+};
+
+const ensureTransportSession = async () => {
+  if (transportSession && Date.now() < (transportSession.expiresAt - TRANSPORT_SESSION_SKEW_MS)) {
+    return transportSession;
+  }
+
+  const clientPqcKeyPair = ml_kem1024.keygen();
+  const clientEcdhKeys = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits']
+  );
+  const clientEcdhPublicRaw = new Uint8Array(
+    await crypto.subtle.exportKey('raw', clientEcdhKeys.publicKey)
+  );
+
+  const response = await api.post('/transport/init', {
+    clientPqcPublicKey: bytesToBase64(clientPqcKeyPair.publicKey),
+    clientEcdhPublicKey: bytesToBase64(clientEcdhPublicRaw)
+  });
+
+  if (!response.data?.success) {
+    throw new Error(response.data?.error || 'Failed to initialize hybrid transport session');
+  }
+
+  const serverEcdhPublicRaw = base64ToBytes(response.data.serverEcdhPublicKey || '');
+  const pqcCiphertext = base64ToBytes(response.data.pqcCiphertext || '');
+  const pqcSharedSecret = ml_kem1024.decapsulate(pqcCiphertext, clientPqcKeyPair.secretKey);
+
+  const serverEcdhPublicKey = await crypto.subtle.importKey(
+    'raw',
+    serverEcdhPublicRaw,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+  const ecdhBits = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: serverEcdhPublicKey },
+      clientEcdhKeys.privateKey,
+      256
+    )
+  );
+
+  const transportKey = await deriveHybridTransportKey(
+    new Uint8Array(pqcSharedSecret),
+    ecdhBits
+  );
+  transportSession = {
+    sessionId: response.data.sessionId,
+    transportKeyBytes: transportKey,
+    expiresAt: Date.now() + ((response.data.expiresIn || 900) * 1000)
+  };
+  return transportSession;
+};
+
+const securePost = async (url, payload) => {
+  const execute = async () => {
+    const session = await ensureTransportSession();
+    const encryptedPayload = await encryptTransportPayload(payload, session.transportKeyBytes);
+    const response = await api.post(url, {
+      transport: {
+        sessionId: session.sessionId,
+        iv: encryptedPayload.iv,
+        ciphertext: encryptedPayload.ciphertext
+      }
+    });
+
+    if (response.data?.transport) {
+      return await decryptTransportPayload(response.data.transport, session.transportKeyBytes);
+    }
+    return response.data;
+  };
+
+  try {
+    return await execute();
+  } catch (error) {
+    const message = String(error?.response?.data?.error || '').toLowerCase();
+    const shouldRetry = message.includes('transport session') || message.includes('transport payload');
+    if (shouldRetry) {
+      clearTransportSession();
+      return await execute();
+    }
+    throw error;
+  }
+};
 
 // ============================================
 // Request Interceptor - Add JWT Token
@@ -150,6 +329,7 @@ export const clearAuthTokens = () => {
   sessionStorage.removeItem(REFRESH_TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
   sessionStorage.removeItem(CSRF_TOKEN_KEY);
+  clearTransportSession();
 };
 
 /**
@@ -197,6 +377,7 @@ const redirectToLogin = () => {
  * @param {object} loginData - Response data from login API
  */
 export const handleLoginSuccess = (loginData) => {
+  clearTransportSession();
   // Store tokens
   setAuthTokens({
     access_token: loginData.access_token,
@@ -230,27 +411,43 @@ export const authAPI = {
   /**
    * Register a new user
    * @param {string} username - Username
-   * @param {string} masterPassword - Master password
+   * @param {string} salt - Base64 encoded registration salt
+   * @param {string} passwordVerifier - Base64 PBKDF2 verifier (never plaintext password)
    * @returns {Promise<object>} Response with userId and salt
    */
-  register: async (username, masterPassword) => {
+  register: async (username, salt, passwordVerifier) => {
     const response = await api.post('/auth/register', {
       username,
-      masterPassword
+      salt,
+      passwordVerifier
     });
     return response.data;
   },
 
   /**
-   * Login user - returns JWT tokens
+   * Request a one-time login challenge.
    * @param {string} username - Username
-   * @param {string} masterPassword - Master password
+   * @returns {Promise<object>} Response with challengeId, challenge, and salt
+   */
+  getLoginChallenge: async (username) => {
+    const response = await api.post('/auth/login/challenge', {
+      username
+    });
+    return response.data;
+  },
+
+  /**
+   * Login user using challenge-response proof - returns JWT tokens
+   * @param {string} username - Username
+   * @param {string} challengeId - One-time challenge ID
+   * @param {string} challengeResponse - HMAC proof derived from vault key
    * @returns {Promise<object>} Response with tokens, userId, and salt
    */
-  login: async (username, masterPassword) => {
+  login: async (username, challengeId, challengeResponse) => {
     const response = await api.post('/auth/login', {
       username,
-      masterPassword
+      challengeId,
+      challengeResponse
     });
     
     if (response.data.success) {
@@ -330,8 +527,7 @@ export const passwordAPI = {
    * @returns {Promise<object>} Success status
    */
   addPassword: async (passwordData) => {
-    const response = await api.post('/passwords/add', passwordData);
-    return response.data;
+    return securePost('/passwords/add', passwordData);
   },
 
   /**
@@ -339,8 +535,7 @@ export const passwordAPI = {
    * @returns {Promise<object>} Array of encrypted passwords
    */
   getAllPasswords: async () => {
-    const response = await api.post('/passwords/get-all', {});
-    return response.data;
+    return securePost('/passwords/get-all', {});
   },
 
   /**
@@ -349,8 +544,7 @@ export const passwordAPI = {
    * @returns {Promise<object>} Success status
    */
   deletePassword: async (passwordId) => {
-    const response = await api.post('/passwords/delete', { passwordId });
-    return response.data;
+    return securePost('/passwords/delete', { passwordId });
   },
 
   /**
@@ -358,8 +552,7 @@ export const passwordAPI = {
    * @returns {Promise<object>} Encrypted data view
    */
   getCryptoView: async () => {
-    const response = await api.post('/passwords/get-crypto-view', {});
-    return response.data;
+    return securePost('/passwords/get-crypto-view', {});
   }
 };
 

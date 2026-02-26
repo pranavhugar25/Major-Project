@@ -14,7 +14,8 @@ Register a new user account.
 ```json
 {
   "username": "user@example.com",
-  "masterPassword": "SecurePassword123!"
+  "salt": "base64_encoded_32_byte_salt",
+  "passwordVerifier": "base64_pbkdf2_verifier"
 }
 ```
 
@@ -40,13 +41,26 @@ Register a new user account.
 ---
 
 ### POST /auth/login
-Authenticate user and retrieve salt for vault key derivation.
+Complete challenge-response login and retrieve tokens.
 
 **Request Body:**
 ```json
 {
   "username": "user@example.com",
-  "masterPassword": "SecurePassword123!"
+  "challengeId": "f6fd20d9-8b08-4b6d-b095-5ea81717065f",
+  "challengeResponse": "base64_hmac_sha256_proof"
+}
+```
+
+---
+
+### POST /auth/login/challenge
+Request one-time login challenge and salt.
+
+**Request Body:**
+```json
+{
+  "username": "user@example.com"
 }
 ```
 
@@ -112,18 +126,46 @@ Get salt for a username (used after page refresh).
 
 ## Password Management Endpoints
 
+### POST /transport/init
+Initialize a hybrid secure transport session for authenticated API calls.
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+- `X-CSRF-Token: <csrf_token>`
+
+**Request Body:**
+```json
+{
+  "clientPqcPublicKey": "base64_ml_kem_public_key",
+  "clientEcdhPublicKey": "base64_p256_public_key"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "sessionId": "a30de4d3-58db-4cd1-b6c5-af95f0ad5644",
+  "serverEcdhPublicKey": "base64_p256_public_key",
+  "pqcCiphertext": "base64_ml_kem_ciphertext",
+  "expiresIn": 900,
+  "algorithm": "ML-KEM-1024+ECDH-P256+HKDF-SHA256+AES-256-GCM"
+}
+```
+
+---
+
 ### POST /passwords/add
 Add or update an encrypted password entry.
 
 **Request Body:**
 ```json
 {
-  "userId": "550e8400-e29b-41d4-a716-446655440000",
-  "siteUrl": "google.com",
-  "siteUsername": "user@gmail.com",
-  "encryptedPassword": "base64_encrypted_password",
-  "iv": "base64_initialization_vector",
-  "authTag": "base64_auth_tag"
+  "transport": {
+    "sessionId": "a30de4d3-58db-4cd1-b6c5-af95f0ad5644",
+    "iv": "base64_iv",
+    "ciphertext": "base64_aes_gcm_encrypted_json_payload"
+  }
 }
 ```
 
@@ -253,10 +295,12 @@ Check if the API is running.
 ## Security Notes
 
 ### Zero-Knowledge Architecture
-- Master password is **never** sent in plain text after initial registration/login
+- Master password is **never** sent to the backend
 - Vault key is derived client-side using PBKDF2 with 600,000 iterations
+- Login uses challenge-response proof (HMAC-SHA256 over a one-time challenge)
 - All password encryption/decryption happens in the browser
 - Server only stores encrypted ciphertext and authentication metadata
+- Password API payloads use hybrid transport sessions (ML-KEM + ECDH + AES-GCM) in addition to TLS
 
 ### Encryption Details
 - **Algorithm:** AES-256-CBC (simulating GCM for this demo)

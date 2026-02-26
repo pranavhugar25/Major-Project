@@ -3,8 +3,12 @@ Authentication routes for registration, login, refresh, and logout.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import re
+import secrets
 import time
 import uuid
 from typing import Dict
@@ -20,23 +24,24 @@ from utils.auth import (
     require_auth,
     verify_refresh_token,
 )
-from utils.crypto import generate_salt, hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._@+-]{3,255}$")
-MAX_MASTER_PASSWORD_LENGTH = 1024
 
 # Brute-force protections.
 MAX_FAILED_ATTEMPTS = 10
 LOCKOUT_DURATION_SECONDS = 15 * 60
 ATTEMPT_WINDOW_SECONDS = 15 * 60
 MAX_TRACKED_ATTEMPTS = 5000
+LOGIN_CHALLENGE_TTL_SECONDS = 120
+MAX_TRACKED_CHALLENGES = 5000
 
 # key: "<ip>:<username-lower>"
 failed_login_attempts: Dict[str, Dict[str, float]] = {}
+login_challenges: Dict[str, Dict[str, str | float]] = {}
 
 
 def _client_ip() -> str:
@@ -102,21 +107,82 @@ def _validate_username(username: str) -> bool:
     return bool(USERNAME_PATTERN.fullmatch(username.strip()))
 
 
-def _validate_master_password(master_password: str) -> str:
-    if not master_password:
-        return "Master password is required"
-    if len(master_password) < 12:
-        return "Password must be at least 12 characters"
-    if len(master_password) > MAX_MASTER_PASSWORD_LENGTH:
-        return "Password is too long"
+def _decode_base64_field(value: str, field_name: str) -> bytes:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} is required")
+    try:
+        return base64.b64decode(value.encode("utf-8"), validate=True)
+    except Exception as exc:
+        raise ValueError(f"{field_name} must be valid base64") from exc
 
-    has_uppercase = any(char.isupper() for char in master_password)
-    has_lowercase = any(char.islower() for char in master_password)
-    has_digit = any(char.isdigit() for char in master_password)
-    has_special = any(not char.isalnum() for char in master_password)
-    if not (has_uppercase and has_lowercase and has_digit and has_special):
-        return "Password must contain uppercase, lowercase, number, and special character"
+
+def _validate_registration_fields(salt: str, password_verifier: str) -> str:
+    try:
+        salt_bytes = _decode_base64_field(salt, "Salt")
+        verifier_bytes = _decode_base64_field(password_verifier, "Password verifier")
+    except ValueError as exc:
+        return str(exc)
+
+    if len(salt_bytes) < 16:
+        return "Salt must be at least 16 bytes"
+    if len(verifier_bytes) != 32:
+        return "Password verifier must be 32 bytes"
     return ""
+
+
+def _cleanup_login_challenges(now: float) -> None:
+    stale_ids = []
+    for challenge_id, state in login_challenges.items():
+        if float(state.get("expires_at", 0.0)) <= now:
+            stale_ids.append(challenge_id)
+    for challenge_id in stale_ids:
+        login_challenges.pop(challenge_id, None)
+
+    if len(login_challenges) > MAX_TRACKED_CHALLENGES:
+        sorted_items = sorted(
+            login_challenges.items(),
+            key=lambda item: float(item[1].get("expires_at", 0.0)),
+        )
+        remove_count = len(login_challenges) - MAX_TRACKED_CHALLENGES
+        for challenge_id, _state in sorted_items[:remove_count]:
+            login_challenges.pop(challenge_id, None)
+
+
+def _create_login_challenge(username: str, ip_addr: str, salt: str, now: float) -> Dict[str, object]:
+    challenge_id = str(uuid.uuid4())
+    challenge = base64.b64encode(secrets.token_bytes(32)).decode("utf-8")
+    login_challenges[challenge_id] = {
+        "username": username.lower(),
+        "ip": ip_addr,
+        "challenge": challenge,
+        "expires_at": now + LOGIN_CHALLENGE_TTL_SECONDS,
+    }
+    return {
+        "challengeId": challenge_id,
+        "challenge": challenge,
+        "salt": salt,
+        "expiresIn": LOGIN_CHALLENGE_TTL_SECONDS,
+    }
+
+
+def _consume_login_challenge(challenge_id: str, username: str, ip_addr: str, now: float) -> str | None:
+    state = login_challenges.pop(challenge_id, None)
+    if not state:
+        return None
+    if float(state.get("expires_at", 0.0)) <= now:
+        return None
+    if str(state.get("username", "")).lower() != username.lower():
+        return None
+    if str(state.get("ip", "")) != ip_addr:
+        return None
+    return str(state.get("challenge", ""))
+
+
+def _compute_expected_challenge_response(stored_verifier_b64: str, challenge_b64: str) -> str:
+    verifier_bytes = _decode_base64_field(stored_verifier_b64, "Stored verifier")
+    challenge_bytes = _decode_base64_field(challenge_b64, "Challenge")
+    digest = hmac.new(verifier_bytes, challenge_bytes, hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
 
 
 @auth_bp.route("/register", methods=["POST"])
@@ -124,15 +190,27 @@ def register():
     try:
         data = request.get_json(silent=True) or {}
         username = (data.get("username") or "").strip()
-        master_password = data.get("masterPassword") or ""
+        password_verifier = (data.get("passwordVerifier") or "").strip()
+        salt = (data.get("salt") or "").strip()
         ip_addr = _client_ip()
 
         if not _validate_username(username):
             return jsonify({"success": False, "error": "Invalid username format"}), 400
 
-        password_error = _validate_master_password(master_password)
-        if password_error:
-            return jsonify({"success": False, "error": password_error}), 400
+        if data.get("masterPassword"):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Plaintext master password submission is not supported",
+                    }
+                ),
+                400,
+            )
+
+        field_error = _validate_registration_fields(salt, password_verifier)
+        if field_error:
+            return jsonify({"success": False, "error": field_error}), 400
 
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
@@ -145,12 +223,10 @@ def register():
             )
             return jsonify({"success": False, "error": "Username already exists"}), 409
 
-        salt = generate_salt()
-        master_password_hash = hash_password(master_password, salt)
         new_user = User(
             user_id=str(uuid.uuid4()),
             username=username,
-            master_password_hash=master_password_hash,
+            master_password_hash=password_verifier,
             salt=salt,
         )
         db.session.add(new_user)
@@ -162,6 +238,7 @@ def register():
             user_id=str(new_user.user_id),
             username=username,
             ip_address=ip_addr,
+            details={"auth_protocol": "salted-verifier"},
         )
 
         return (
@@ -172,14 +249,75 @@ def register():
                     "userId": str(new_user.user_id),
                     "salt": salt,
                     "username": username,
+                    "authProtocol": "salted-verifier",
                 }
             ),
             201,
         )
-    except Exception as exc:
+    except Exception:
         db.session.rollback()
         logger.exception("Registration failed")
         return jsonify({"success": False, "error": "Registration failed. Please try again."}), 500
+
+
+@auth_bp.route("/login/challenge", methods=["POST"])
+def login_challenge():
+    try:
+        data = request.get_json(silent=True) or {}
+        username = (data.get("username") or "").strip()
+        ip_addr = _client_ip()
+        now = time.time()
+
+        if not _validate_username(username):
+            return jsonify({"success": False, "error": "Invalid username or password"}), 401
+
+        attempt_key = _attempt_key(username, ip_addr)
+        _cleanup_failed_attempts(now)
+        _cleanup_login_challenges(now)
+
+        lock_remaining = _is_locked(attempt_key, now)
+        if lock_remaining > 0:
+            log_security_event(
+                "login_challenge_blocked",
+                success=False,
+                username=username,
+                ip_address=ip_addr,
+                details={"retry_after_seconds": lock_remaining},
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Account temporarily locked due to too many failed attempts",
+                        "retry_after": lock_remaining,
+                    }
+                ),
+                429,
+            )
+
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            log_security_event(
+                "login_challenge",
+                success=False,
+                username=username,
+                ip_address=ip_addr,
+                details={"reason": "unknown_user"},
+            )
+            return jsonify({"success": False, "error": "Invalid username or password"}), 401
+
+        challenge = _create_login_challenge(username, ip_addr, user.salt, now)
+        log_security_event(
+            "login_challenge",
+            success=True,
+            user_id=str(user.user_id),
+            username=username,
+            ip_address=ip_addr,
+        )
+        return jsonify({"success": True, **challenge}), 200
+    except Exception:
+        logger.exception("Login challenge failed")
+        return jsonify({"success": False, "error": "Login challenge failed. Please try again."}), 500
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -187,17 +325,22 @@ def login():
     try:
         data = request.get_json(silent=True) or {}
         username = (data.get("username") or "").strip()
-        master_password = data.get("masterPassword") or ""
+        challenge_id = (data.get("challengeId") or "").strip()
+        challenge_response = (data.get("challengeResponse") or "").strip()
         ip_addr = _client_ip()
         now = time.time()
 
-        if not username or not master_password:
-            return jsonify({"success": False, "error": "Username and master password are required"}), 400
+        if not username or not challenge_id or not challenge_response:
+            return (
+                jsonify({"success": False, "error": "Username, challenge ID, and challenge response are required"}),
+                400,
+            )
         if not _validate_username(username):
             return jsonify({"success": False, "error": "Invalid username or password"}), 401
 
         attempt_key = _attempt_key(username, ip_addr)
         _cleanup_failed_attempts(now)
+        _cleanup_login_challenges(now)
 
         lock_remaining = _is_locked(attempt_key, now)
         if lock_remaining > 0:
@@ -220,7 +363,41 @@ def login():
             )
 
         user = User.query.filter_by(username=username).first()
-        if not user or not verify_password(master_password, user.salt, user.master_password_hash):
+        challenge = _consume_login_challenge(challenge_id, username, ip_addr, now)
+        if not user or not challenge:
+            state = _record_failed_attempt(attempt_key, now)
+            remaining_attempts = max(0, MAX_FAILED_ATTEMPTS - int(state["count"]))
+            status_code = 429 if state.get("locked_until", 0) > now else 401
+
+            log_security_event(
+                "login",
+                success=False,
+                username=username,
+                ip_address=ip_addr,
+                details={
+                    "remaining_attempts": remaining_attempts,
+                    "locked": status_code == 429,
+                    "reason": "missing_or_invalid_challenge",
+                },
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Invalid username or password",
+                        "remaining_attempts": remaining_attempts,
+                    }
+                ),
+                status_code,
+            )
+
+        try:
+            expected_response = _compute_expected_challenge_response(user.master_password_hash, challenge)
+        except ValueError:
+            logger.warning("Corrupt verifier/challenge data for user=%s", user.username)
+            return jsonify({"success": False, "error": "Authentication data is invalid"}), 500
+
+        if not secrets.compare_digest(expected_response, challenge_response):
             state = _record_failed_attempt(attempt_key, now)
             remaining_attempts = max(0, MAX_FAILED_ATTEMPTS - int(state["count"]))
             status_code = 429 if state.get("locked_until", 0) > now else 401
@@ -255,6 +432,7 @@ def login():
             user_id=str(user.user_id),
             username=user.username,
             ip_address=ip_addr,
+            details={"auth_protocol": "challenge-response"},
         )
 
         return (

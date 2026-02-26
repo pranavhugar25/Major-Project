@@ -90,6 +90,11 @@ function CryptoView({ user }) {
                 <code className="truncated">{cryptoData.masterPasswordHash}</code>
                 <small>Server only stores hash, not actual password</small>
               </div>
+              <div className="data-item">
+                <label>PQC Envelope Status</label>
+                <code>{cryptoData.pqc_enabled ? 'Active' : 'Classical Fallback'}</code>
+                <small>{cryptoData.pqc_enveloped_entries || 0} entries wrapped with PQC</small>
+              </div>
             </div>
           </div>
 
@@ -130,6 +135,17 @@ function CryptoView({ user }) {
                       <span className="note-icon">⚠️</span>
                       <small>{pwd.note}</small>
                     </div>
+                    
+                    {pwd.pqc && (
+                      <div className="data-row">
+                        <label>PQC:</label>
+                        <code>
+                          {pwd.pqc.active
+                            ? `${pwd.pqc.algorithm} (verified)`
+                            : 'Not active for this entry'}
+                        </code>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

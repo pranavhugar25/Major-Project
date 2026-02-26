@@ -240,7 +240,11 @@ function StoredPasswords({ user, vaultKey }) {
               </div>
 
               <div className="card-footer">
-                <small>Encrypted with AES-256-GCM</small>
+                <small>
+                  {pwd.pqc?.active
+                    ? 'Encrypted with AES-256-GCM + ML-KEM/ML-DSA envelope'
+                    : 'Encrypted with AES-256-GCM'}
+                </small>
               </div>
             </div>
           ))}

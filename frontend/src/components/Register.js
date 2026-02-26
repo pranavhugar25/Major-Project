@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
-import { deriveVaultKey, calculatePasswordStrength } from '../utils/crypto';
+import { calculatePasswordStrength, deriveVaultKey, generateSalt } from '../utils/crypto';
 import '../styles/Auth.css';
 
 function Register({ onRegisterSuccess, onSwitchToLogin }) {
@@ -39,19 +39,20 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
     setLoading(true);
 
     try {
-      // Register user
-      const response = await authAPI.register(username, masterPassword);
+      // Generate per-user salt and verifier client-side (never send plaintext password)
+      const salt = generateSalt(32);
+      const passwordVerifier = await deriveVaultKey(masterPassword, salt);
+
+      // Register user with salted verifier only
+      const response = await authAPI.register(username, salt, passwordVerifier);
 
       if (response.success) {
-        // Derive vault key client-side
-        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
-
         // Pass user data and vault key to parent
         onRegisterSuccess({
           userId: response.userId,
           username: response.username,
-          salt: response.salt
-        }, vaultKey);
+          salt: response.salt || salt
+        }, passwordVerifier);
       } else {
         setError(response.error || 'Registration failed');
       }

@@ -36,7 +36,7 @@ COPY backend/ .
 RUN python -c "import oqs; kem=oqs.KeyEncapsulation('ML-KEM-1024'); pk=kem.generate_keypair(); out=kem.encap_secret(pk); ct,ss=(out if isinstance(out, tuple) else (out, kem.decap_secret(out))); kem2=oqs.KeyEncapsulation('ML-KEM-1024', secret_key=kem.export_secret_key()); assert kem2.decap_secret(ct)==ss; sig=oqs.Signature('ML-DSA-87'); spk=sig.generate_keypair(); s=sig.sign(b'pqc'); assert oqs.Signature('ML-DSA-87').verify(b'pqc', s, spk)"
 
 # Stage 2: Frontend
-FROM node:18-alpine AS frontend
+FROM node:20-alpine AS frontend
 
 WORKDIR /app/frontend
 

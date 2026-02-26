@@ -52,6 +52,12 @@ class Password(db.Model):
     
     # Relationship to user
     user = db.relationship('User', back_populates='passwords')
+    pqc_envelope = db.relationship(
+        'PasswordPQCEnvelope',
+        back_populates='password',
+        cascade='all, delete-orphan',
+        uselist=False,
+    )
     
     # Composite unique constraint: one password per site per user
     __table_args__ = (
@@ -69,6 +75,45 @@ class Password(db.Model):
             'authTag': self.auth_tag,
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class PasswordPQCEnvelope(db.Model):
+    """
+    PQC envelope data for encrypted password payloads.
+
+    The client ciphertext is wrapped with ML-KEM-derived symmetric encryption
+    and signed with ML-DSA to make PQC part of the active storage flow.
+    """
+    __tablename__ = 'password_pqc_envelopes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    password_id = db.Column(
+        db.String(36),
+        db.ForeignKey('passwords.password_id', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    kem_ciphertext = db.Column(db.Text, nullable=False)
+    encrypted_kem_private_key = db.Column(db.Text, nullable=False)
+    kem_private_key_iv = db.Column(db.String(512), nullable=False)
+    payload_ciphertext = db.Column(db.Text, nullable=False)
+    payload_iv = db.Column(db.String(512), nullable=False)
+    payload_signature = db.Column(db.Text, nullable=False)
+    signature_public_key = db.Column(db.Text, nullable=False)
+    pqc_algorithm = db.Column(db.String(128), nullable=False, default='ML-KEM-1024+ML-DSA-87')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    password = db.relationship('Password', back_populates='pqc_envelope')
+
+    def to_dict(self):
+        return {
+            'passwordId': str(self.password_id),
+            'pqcAlgorithm': self.pqc_algorithm,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

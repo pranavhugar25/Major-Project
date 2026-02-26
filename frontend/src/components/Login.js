@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
-import { deriveVaultKey } from '../utils/crypto';
+import { createChallengeResponse, deriveVaultKey } from '../utils/crypto';
 import '../styles/Auth.css';
 
 function Login({ onLoginSuccess, onSwitchToRegister }) {
@@ -20,20 +20,29 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
     setLoading(true);
 
     try {
-      // Login to get salt
-      const response = await authAPI.login(username, masterPassword);
+      // Step 1: Request one-time challenge + salt
+      const challengeData = await authAPI.getLoginChallenge(username);
+      const salt = challengeData?.salt;
+      const challenge = challengeData?.challenge;
+      const challengeId = challengeData?.challengeId;
+      if (!challengeData?.success || !salt || !challenge || !challengeId) {
+        throw new Error(challengeData?.error || 'Failed to start login flow');
+      }
 
+      // Step 2: Derive vault key and generate challenge response locally
+      const vaultKey = await deriveVaultKey(masterPassword, salt);
+      const challengeResponse = await createChallengeResponse(vaultKey, challenge);
+
+      // Step 3: Complete login with proof (never send master password)
+      const response = await authAPI.login(username, challengeId, challengeResponse);
       if (response.success) {
         setFailedAttempts(0);
-        
-        // Derive vault key client-side
-        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
 
         // Pass user data and vault key to parent
         onLoginSuccess({
           userId: response.userId,
           username: response.username,
-          salt: response.salt
+          salt: response.salt || salt
         }, vaultKey);
       } else {
         setFailedAttempts(prev => prev + 1);

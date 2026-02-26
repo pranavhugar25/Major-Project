@@ -132,7 +132,11 @@ User                    Client                    Server
 
 ### Layer 3: Transport Security
 - **HTTPS/TLS 1.3** for encrypted communication
-- **PQC Hybrid Mode** for quantum-resistant tunneling
+- **Application-layer Hybrid PQC Session** for quantum-resistant payload transport:
+  - ML-KEM-1024 (PQC shared secret)
+  - ECDH P-256 (classical shared secret)
+  - HKDF-SHA256 (hybrid session key derivation)
+  - AES-256-GCM (request/response payload envelope)
 - **Certificate Pinning** (production recommendation)
 
 ### Layer 4: Server-Side Protection
@@ -192,7 +196,7 @@ CREATE TABLE pqc_sessions (
 ### Frontend
 - **Framework:** React 18.2
 - **HTTP Client:** Axios
-- **Crypto Library:** CryptoJS
+- **Crypto Libraries:** Web Crypto API + @noble/post-quantum
 - **Styling:** Custom CSS with CSS Variables
 - **Fonts:** Google Fonts (Outfit, Space Mono)
 

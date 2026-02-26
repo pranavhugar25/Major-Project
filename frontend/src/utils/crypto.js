@@ -35,6 +35,19 @@ export const generateRandomKey = async (length = 32) => {
 };
 
 /**
+ * Generate a base64-encoded cryptographic salt.
+ *
+ * @param {number} length - Salt length in bytes (default 32)
+ * @returns {string} Base64 encoded salt
+ */
+export const generateSalt = (length = 32) => {
+  const saltBytes = crypto.getRandomValues(new Uint8Array(length));
+  const saltBase64 = btoa(String.fromCharCode(...saltBytes));
+  secureZeroize(saltBytes);
+  return saltBase64;
+};
+
+/**
  * Derive vault key from master password using PBKDF2
  * This is the core of zero-knowledge architecture - done entirely client-side
  * 
@@ -77,6 +90,37 @@ export const deriveVaultKey = async (masterPassword, salt) => {
   } catch (error) {
     console.error('Cryptographic operation failed:', error);
     throw new Error('Failed to derive vault key: ' + error.message);
+  }
+};
+
+/**
+ * Create a login challenge-response proof from a derived vault key.
+ * Uses HMAC-SHA256 where key=vaultKey and message=challenge bytes.
+ *
+ * @param {string} vaultKeyBase64 - Base64 encoded derived vault key
+ * @param {string} challengeBase64 - Base64 encoded one-time challenge
+ * @returns {Promise<string>} Base64 encoded HMAC proof
+ */
+export const createChallengeResponse = async (vaultKeyBase64, challengeBase64) => {
+  try {
+    const keyBytes = Uint8Array.from(atob(vaultKeyBase64), c => c.charCodeAt(0));
+    const challengeBytes = Uint8Array.from(atob(challengeBase64), c => c.charCodeAt(0));
+
+    const hmacKey = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const signature = await crypto.subtle.sign('HMAC', hmacKey, challengeBytes);
+    secureZeroize(keyBytes);
+    secureZeroize(challengeBytes);
+    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+  } catch (error) {
+    console.error('Cryptographic operation failed:', error);
+    throw new Error('Failed to create challenge response: ' + error.message);
   }
 };
 
