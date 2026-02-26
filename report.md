@@ -147,30 +147,25 @@ Recommendation:
 - Add strict frontend CSP and related headers at nginx layer.
 - Pair with token-storage hardening (Finding #2).
 
-## 11) Low: Dead/unused API and model artifacts increase attack surface and maintenance risk
+## 11) Low: Frontend CRA toolchain has high deprecation/vulnerability noise; remediation is likely breaking
 Evidence:
-- Frontend references non-existent endpoints:
-  - `frontend/src/utils/api.js:504` (`/auth/check-username`)
-  - `frontend/src/utils/api.js:515` (`/auth/get-salt`)
-- Unused model:
-  - `backend/models/database.py:120` (`PQCSession`)
+- `frontend/package.json:13` pins `react-scripts` to `5.0.1`.
+- `frontend/package-lock.json:13715` shows the same legacy CRA toolchain root.
+- Docker audit run (`docker compose run --rm frontend npm audit --omit=dev`, 2026-02-26) reports transitive vulnerabilities tied largely to CRA dependencies (`10 high`, `4 moderate`, `1 low`).
+- Build output also includes non-security lint warnings in hooks:
+  - `frontend/src/components/CryptoView.js:14`
+  - `frontend/src/components/Dashboard.js:44`
+  - `frontend/src/components/StoredPasswords.js:18`
 
 Impact:
-- Drift/confusion, accidental partial implementations, and regression risk.
+- Security review signal is noisy due to stale transitive dependencies.
+- Quick fixes like `npm audit fix --force` can introduce breaking changes.
+- Operational risk is currently lower because production serves a static build (no exposed dev server), but this remains maintenance debt.
 
 Recommendation:
-- Remove dead calls/models or implement fully with tests and docs.
-
-## 12) Low: Documentation drift/inaccuracy in cryptography stack claims
-Evidence:
-- `docs/ARCHITECTURE.md:208` still says simulated `kyber-py, dilithium-py`.
-- `docs/API.md:313` and `docs/API.md:314` still say PQC is simulated.
-
-Impact:
-- Misleads operators/reviewers and weakens assurance posture.
-
-Recommendation:
-- Align docs with actual implemented libs/flows and clearly mark residual gaps.
+- Treat as planned modernization work, not hotfix: migrate from CRA (`react-scripts`) to a maintained bundler (e.g., Vite) in a dedicated branch.
+- Fix hook warnings as non-breaking hygiene in the current codebase.
+- Re-run Docker-based `npm audit` and build validation after migration.
 
 ## Redundancies and Complexity Hotspots
 
@@ -179,14 +174,11 @@ Recommendation:
 - Hybrid transport AES envelope (`frontend/src/utils/api.js`, `backend/utils/transport.py`)
 - Server-side PQC envelope at rest (`backend/utils/pqc_envelope.py`)
 
-This can be valid defense-in-depth, but currently increases complexity and bug surface without clear policy boundaries.
+This can be valid defense-in-depth, but increases complexity and bug surface. Policy boundaries are now documented, but enforcement and simplification decisions are still pending.
 
 2. CSRF enforcement with bearer-token auth:
 - CSRF on bearer-token APIs can be redundant if cookies are not auth carrier.
 - Current setup mixes bearer + CSRF token while keeping tokens in JS storage.
-
-3. Legacy PQC session model vs new transport session mechanism:
-- `backend/models/database.py:120` (`PQCSession`) appears superseded by in-memory `transport_sessions`.
 
 ## Recommended Remediation Plan
 
@@ -202,8 +194,7 @@ This can be valid defense-in-depth, but currently increases complexity and bug s
 
 ## Medium-term (P2)
 - Introduce proper key management for envelope wrapping keys.
-- Remove dead code paths and unused models/endpoints.
-- Bring docs fully in sync with implementation.
+- Plan and execute frontend toolchain migration off `react-scripts` to reduce stale transitive dependency risk.
 
 ## Notes
 

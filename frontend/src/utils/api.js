@@ -494,26 +494,6 @@ export const authAPI = {
     } finally {
       handleLogout();
     }
-  },
-
-  /**
-   * Check if username is available
-   * @param {string} username - Username to check
-   * @returns {Promise<object>} Availability status
-   */
-  checkUsername: async (username) => {
-    const response = await api.post('/auth/check-username', { username });
-    return response.data;
-  },
-
-  /**
-   * Get salt for a username
-   * @param {string} username - Username
-   * @returns {Promise<object>} Salt data
-   */
-  getSalt: async (username) => {
-    const response = await api.post('/auth/get-salt', { username });
-    return response.data;
   }
 };
 

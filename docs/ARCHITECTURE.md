@@ -15,7 +15,7 @@ The PQC Password Manager implements a **Zero-Knowledge Architecture** with **Pos
 │  │  • Client-side Crypto (AES-256, PBKDF2)               │ │
 │  │  • PQC Key Exchange (ML-KEM, ML-DSA)                  │ │
 │  └────────────────────────────────────────────────────────┘ │
-│                           ↕ HTTPS + PQC                      │
+│                  ↕ HTTPS/TLS + Hybrid App PQC                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ↓
@@ -32,7 +32,7 @@ The PQC Password Manager implements a **Zero-Knowledge Architecture** with **Pos
 │  │  Database (SQLite/PostgreSQL)                          │ │
 │  │  • Users (hashed passwords, salts)                     │ │
 │  │  • Encrypted password entries                          │ │
-│  │  • PQC session keys                                    │ │
+│  │  • PQC-wrapped password envelopes                      │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -137,6 +137,7 @@ User                    Client                    Server
   - ECDH P-256 (classical shared secret)
   - HKDF-SHA256 (hybrid session key derivation)
   - AES-256-GCM (request/response payload envelope)
+- **Important boundary:** this is app-layer PQC transport. TLS-layer PQC still requires a PQC-enabled TLS terminator/proxy.
 - **Certificate Pinning** (production recommendation)
 
 ### Layer 4: Server-Side Protection
@@ -150,8 +151,7 @@ User                    Client                    Server
 ### Users Table
 ```sql
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    user_id UUID UNIQUE NOT NULL,
+    user_id UUID PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
     master_password_hash VARCHAR(512) NOT NULL,
     salt VARCHAR(512) NOT NULL,
@@ -165,7 +165,7 @@ CREATE TABLE users (
 CREATE TABLE passwords (
     id INTEGER PRIMARY KEY,
     password_id UUID UNIQUE NOT NULL,
-    user_id INTEGER REFERENCES users(id),
+    user_id UUID NOT NULL REFERENCES users(user_id),
     site_url VARCHAR(512) NOT NULL,
     site_username VARCHAR(255) NOT NULL,
     encrypted_password TEXT NOT NULL,
@@ -177,19 +177,25 @@ CREATE TABLE passwords (
 );
 ```
 
-### PQC Sessions Table
+### Password PQC Envelopes Table
 ```sql
-CREATE TABLE pqc_sessions (
+CREATE TABLE password_pqc_envelopes (
     id INTEGER PRIMARY KEY,
-    session_id UUID UNIQUE NOT NULL,
-    user_id INTEGER REFERENCES users(id),
-    kyber_public_key TEXT NOT NULL,
-    dilithium_public_key TEXT NOT NULL,
+    password_id UUID UNIQUE NOT NULL REFERENCES passwords(password_id) ON DELETE CASCADE,
+    kem_ciphertext TEXT NOT NULL,
+    encrypted_kem_private_key TEXT NOT NULL,
+    kem_private_key_iv VARCHAR(512) NOT NULL,
+    payload_ciphertext TEXT NOT NULL,
+    payload_iv VARCHAR(512) NOT NULL,
+    payload_signature TEXT NOT NULL,
+    signature_public_key TEXT NOT NULL,
+    pqc_algorithm VARCHAR(128) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+Transport session state for hybrid payload encryption is ephemeral and stored in backend memory with TTL, not persisted in SQL.
 
 ## Technology Stack
 
@@ -205,12 +211,12 @@ CREATE TABLE pqc_sessions (
 - **ORM:** SQLAlchemy 2.0
 - **Database:** SQLite (dev), PostgreSQL (production)
 - **Crypto:** cryptography, pycryptodome
-- **PQC:** kyber-py, dilithium-py (simulated)
+- **PQC:** liboqs-python (ML-KEM-1024, ML-DSA-87)
 
 ## Threat Model
 
 ### Protected Against:
-✅ Man-in-the-Middle attacks (HTTPS + PQC)
+✅ Man-in-the-Middle attacks (HTTPS/TLS + app-layer hybrid transport)
 ✅ Server breaches (Zero-Knowledge)
 ✅ Database leaks (Encrypted data)
 ✅ Quantum computer attacks (PQC)

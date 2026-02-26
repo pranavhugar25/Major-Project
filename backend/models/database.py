@@ -115,36 +115,3 @@ class PasswordPQCEnvelope(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
         }
-
-
-class PQCSession(db.Model):
-    """
-    Post-Quantum Cryptography session data
-    Stores ephemeral keys for PQC secure communication
-    """
-    __tablename__ = 'pqc_sessions'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
-    user_id = db.Column(db.String(36), db.ForeignKey('users.user_id'), nullable=True, index=True)
-    
-    # ML-KEM (Kyber) public key for key encapsulation
-    kyber_public_key = db.Column(db.Text, nullable=False)
-    
-    # ML-DSA (Dilithium) public key for signatures
-    dilithium_public_key = db.Column(db.Text, nullable=False)
-    
-    # Session metadata
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    is_active = db.Column(db.Boolean, default=True)
-    
-    def to_dict(self):
-        """Convert session to dictionary"""
-        return {
-            'sessionId': str(self.session_id),
-            'kyberPublicKey': self.kyber_public_key,
-            'dilithiumPublicKey': self.dilithium_public_key,
-            'expiresAt': self.expires_at.isoformat() if self.expires_at else None,
-            'isActive': self.is_active
-        }

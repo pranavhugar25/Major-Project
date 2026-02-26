@@ -68,10 +68,10 @@ Request one-time login challenge and salt.
 ```json
 {
   "success": true,
-  "message": "Login successful",
-  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "challengeId": "f6fd20d9-8b08-4b6d-b095-5ea81717065f",
+  "challenge": "base64_random_challenge",
   "salt": "base64_encoded_salt",
-  "username": "user@example.com"
+  "expiresIn": 300
 }
 ```
 
@@ -85,46 +85,9 @@ Request one-time login challenge and salt.
 
 ---
 
-### POST /auth/check-username
-Check if a username is available.
-
-**Request Body:**
-```json
-{
-  "username": "user@example.com"
-}
-```
-
-**Response (200 OK):**
-```json
-{
-  "available": true
-}
-```
-
----
-
-### POST /auth/get-salt
-Get salt for a username (used after page refresh).
-
-**Request Body:**
-```json
-{
-  "username": "user@example.com"
-}
-```
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "salt": "base64_encoded_salt"
-}
-```
-
----
-
 ## Password Management Endpoints
+
+All password endpoints use a hybrid transport envelope (`transport`) during normal operation. A plain JSON payload is only a compatibility fallback when transport is not initialized.
 
 ### POST /transport/init
 Initialize a hybrid secure transport session for authenticated API calls.
@@ -195,7 +158,11 @@ Retrieve all encrypted passwords for a user.
 **Request Body:**
 ```json
 {
-  "userId": "550e8400-e29b-41d4-a716-446655440000"
+  "transport": {
+    "sessionId": "a30de4d3-58db-4cd1-b6c5-af95f0ad5644",
+    "iv": "base64_iv",
+    "ciphertext": "base64_aes_gcm_encrypted_json_payload"
+  }
 }
 ```
 
@@ -211,6 +178,11 @@ Retrieve all encrypted passwords for a user.
       "encryptedPassword": "base64_encrypted_password",
       "iv": "base64_initialization_vector",
       "authTag": "base64_auth_tag",
+      "pqc": {
+        "active": true,
+        "verified": true,
+        "status": "verified"
+      },
       "createdAt": "2024-01-01T00:00:00",
       "updatedAt": "2024-01-01T00:00:00"
     }
@@ -226,7 +198,11 @@ Delete a password entry.
 **Request Body:**
 ```json
 {
-  "passwordId": "660e8400-e29b-41d4-a716-446655440000"
+  "transport": {
+    "sessionId": "a30de4d3-58db-4cd1-b6c5-af95f0ad5644",
+    "iv": "base64_iv",
+    "ciphertext": "base64_aes_gcm_encrypted_json_payload"
+  }
 }
 ```
 
@@ -246,7 +222,11 @@ Get encrypted data view for transparency demonstration.
 **Request Body:**
 ```json
 {
-  "userId": "550e8400-e29b-41d4-a716-446655440000"
+  "transport": {
+    "sessionId": "a30de4d3-58db-4cd1-b6c5-af95f0ad5644",
+    "iv": "base64_iv",
+    "ciphertext": "base64_aes_gcm_encrypted_json_payload"
+  }
 }
 ```
 
@@ -303,16 +283,17 @@ Check if the API is running.
 - Password API payloads use hybrid transport sessions (ML-KEM + ECDH + AES-GCM) in addition to TLS
 
 ### Encryption Details
-- **Algorithm:** AES-256-CBC (simulating GCM for this demo)
+- **Algorithm:** AES-256-GCM
 - **Key Derivation:** PBKDF2-HMAC-SHA256
 - **Iterations:** 600,000
 - **Salt:** Unique per user, 256 bits
 - **IV:** Unique per password, 96 bits
 
 ### Post-Quantum Cryptography
-- **Key Encapsulation:** ML-KEM (Kyber) - simulated in this demo
-- **Digital Signatures:** ML-DSA (Dilithium) - simulated in this demo
-- In production, use actual PQC libraries like liboqs or pqcrypto
+- **Key Encapsulation:** ML-KEM-1024 (liboqs)
+- **Digital Signatures:** ML-DSA-87 (liboqs)
+- **Transport Session:** Hybrid ML-KEM-1024 + ECDH P-256 + HKDF-SHA256 + AES-256-GCM
+- TLS cipher suite remains deployment-dependent; TLS-layer PQC requires a PQC-enabled TLS terminator/proxy.
 
 ---
 
