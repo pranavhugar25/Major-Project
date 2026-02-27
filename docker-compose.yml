@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
       target: backend
     container_name: pqc-backend
+    env_file:
+      - .env
     volumes:
       - ./backend:/app/backend
     ports:

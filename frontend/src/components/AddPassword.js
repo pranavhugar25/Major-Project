@@ -34,13 +34,6 @@ function AddPassword({ user, vaultKey }) {
     setLoading(true);
 
     try {
-      // Validate URL format
-      const urlPattern = /^https?:\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+$/;
-      if (siteUrl && !urlPattern.test(siteUrl)) {
-        setError('Please enter a valid URL format');
-        setLoading(false);
-        return;
-      }
       
       // Encrypt password client-side
       console.log('AddPassword - vaultKey:', vaultKey ? 'present' : 'missing');
