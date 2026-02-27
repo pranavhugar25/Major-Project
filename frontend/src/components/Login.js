@@ -7,12 +7,11 @@ import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
 import { deriveVaultKey } from '../utils/crypto';
 import { 
-  loadLiboqsWasm, 
-  initSession,
+  initPQC,
+  isPQCAvailable,
+  generateKeypair,
   encapsulate,
-  isWasmLoaded,
-  hasActiveSession,
-  getStoredSession
+  initSession
 } from '../utils/pqc';
 import '../styles/Auth.css';
 
@@ -29,25 +28,19 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
   React.useEffect(() => {
     const initPQC = async () => {
       try {
-        // Check if already loaded
-        if (isWasmLoaded()) {
-          // Check for existing session
-          if (hasActiveSession()) {
-            setPqcStatus('connected');
-          } else {
-            setPqcStatus('ready');
-          }
+        // Check if noble-post-quantum is already loaded
+        if (isPQCAvailable()) {
+          setPqcStatus('ready');
+          console.log('[Login] PQC initialized successfully (noble-post-quantum)');
           return;
         }
         
-        // Load liboqs WASM
-        await loadLiboqsWasm();
-        
-        // Check for existing session
-        if (hasActiveSession()) {
-          setPqcStatus('connected');
-        } else {
+        // Try to initialize PQC
+        const status = await initPQC();
+        if (status.available) {
           setPqcStatus('ready');
+        } else {
+          throw new Error(status.error || 'PQC not available');
         }
         console.log('[Login] PQC initialized successfully');
       } catch (err) {

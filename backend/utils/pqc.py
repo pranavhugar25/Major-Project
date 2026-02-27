@@ -16,9 +16,9 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Try to import liboqs, provide helpful error if not available
+# Try to import oqs (liboqs-python), provide helpful error if not available
 try:
-    import liboqs
+    from oqs import KeyEncapsulation, Signature
     LIBOQS_AVAILABLE = True
 except ImportError:
     LIBOQS_AVAILABLE = False
@@ -100,9 +100,9 @@ class MLKEM1024:
         _check_liboqs()
         
         try:
-            with liboqs.KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
-                public_key = kem.generate_public_key()
-                secret_key = kem.generate_secret_key()
+            with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
+                public_key = kem.generate_keypair()
+                secret_key = kem.export_secret_key()
                 
                 return PQCKeyPair(
                     public_key=base64.b64encode(public_key).decode('utf-8'),
@@ -132,9 +132,8 @@ class MLKEM1024:
         try:
             public_key = base64.b64decode(public_key_b64)
             
-            with liboqs.KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
-                ciphertext = kem.encap_secret(public_key)
-                shared_secret = kem.export_shared_secret()
+            with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
+                ciphertext, shared_secret = kem.encap_secret(public_key)
                 
                 return KEMResult(
                     ciphertext=base64.b64encode(ciphertext).decode('utf-8'),
@@ -166,7 +165,7 @@ class MLKEM1024:
             ciphertext = base64.b64decode(ciphertext_b64)
             private_key = base64.b64decode(private_key_b64)
             
-            with liboqs.KeyEncapsulation(MLKEM1024.ALGORITHM, private_key) as kem:
+            with KeyEncapsulation(MLKEM1024.ALGORITHM, private_key) as kem:
                 shared_secret = kem.decap_secret(ciphertext)
                 return base64.b64encode(shared_secret).decode('utf-8')
         except Exception as e:
@@ -202,9 +201,9 @@ class MLDSA87:
         _check_liboqs()
         
         try:
-            with liboqs.Signature(MLDSA87.ALGORITHM) as sig:
+            with Signature(MLDSA87.ALGORITHM) as sig:
                 public_key = sig.generate_keypair()
-                secret_key = sig.export_secret_key(public_key)
+                secret_key = sig.export_secret_key()
                 
                 return PQCKeyPair(
                     public_key=base64.b64encode(public_key).decode('utf-8'),
@@ -236,10 +235,9 @@ class MLDSA87:
         try:
             message_bytes = message.encode('utf-8')
             private_key = base64.b64decode(private_key_b64)
-            public_key = base64.b64decode(public_key_b64)
             
-            with liboqs.Signature(MLDSA87.ALGORITHM, public_key) as sig:
-                signature = sig.sign(message_bytes, private_key)
+            with Signature(MLDSA87.ALGORITHM, private_key) as sig:
+                signature = sig.sign(message_bytes)
                 return base64.b64encode(signature).decode('utf-8')
         except Exception as e:
             logger.error(f"ML-DSA-87 signing failed: {e}")
@@ -269,7 +267,7 @@ class MLDSA87:
             signature = base64.b64decode(signature_b64)
             public_key = base64.b64decode(public_key_b64)
             
-            with liboqs.Signature(MLDSA87.ALGORITHM) as sig:
+            with Signature(MLDSA87.ALGORITHM) as sig:
                 return sig.verify(message_bytes, signature, public_key)
         except Exception as e:
             logger.warning(f"ML-DSA-87 verification failed: {e}")

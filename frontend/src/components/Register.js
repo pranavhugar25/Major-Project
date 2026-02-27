@@ -7,11 +7,11 @@ import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
 import { deriveVaultKey, calculatePasswordStrength } from '../utils/crypto';
 import { 
-  loadLiboqsWasm, 
+  initPQC,
+  isPQCAvailable,
   generateKeypair, 
-  initSession,
   encapsulate,
-  isWasmLoaded 
+  initSession
 } from '../utils/pqc';
 import '../styles/Auth.css';
 
@@ -29,15 +29,20 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   React.useEffect(() => {
     const initPQC = async () => {
       try {
-        // Check if already loaded
-        if (isWasmLoaded()) {
+        // Check if noble-post-quantum is already loaded
+        if (isPQCAvailable()) {
           setPqcStatus('ready');
+          console.log('[Register] PQC initialized successfully (noble-post-quantum)');
           return;
         }
         
-        // Load liboqs WASM
-        await loadLiboqsWasm();
-        setPqcStatus('ready');
+        // Initialize PQC
+        const status = await initPQC();
+        if (status.available) {
+          setPqcStatus('ready');
+        } else {
+          throw new Error(status.error || 'PQC not available');
+        }
         console.log('[Register] PQC initialized successfully');
       } catch (err) {
         console.error('[Register] PQC initialization failed:', err);

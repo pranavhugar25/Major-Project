@@ -21,5 +21,13 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
+    <!-- PQC Library - Standalone browser build -->
+    <script src="%PUBLIC_URL%/noble-post-quantum.js"></script>
+    <script>
+      // Expose noblePostQuantum to window for React components
+      if (typeof noblePostQuantum !== 'undefined') {
+        window.noblePostQuantum = noblePostQuantum;
+      }
+    </script>
   </body>
 </html>

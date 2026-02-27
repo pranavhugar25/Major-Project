@@ -334,6 +334,63 @@ export const benchmarkAPI = {
 };
 
 // ============================================
+// PQC Session APIs
+// ============================================
+export const pqcAPI = {
+  /**
+   * Initialize PQC session with server
+   * @param {string} username - Username
+   * @param {string} userId - User ID
+   * @param {string} publicKey - PQC public key (ML-KEM-1024)
+   * @returns {Promise<object>} Session data
+   */
+  initSession: async (username, userId, publicKey) => {
+    const response = await api.post('/auth/pqc/init', {
+      username,
+      userId,
+      publicKey
+    });
+    return response.data;
+  },
+
+  /**
+   * Get PQC session status
+   * @returns {Promise<object>} Session status
+   */
+  getStatus: async () => {
+    const response = await api.get('/pqc/session/status');
+    return response.data;
+  },
+
+  /**
+   * Send heartbeat to keep session alive
+   * @returns {Promise<object>} Heartbeat response
+   */
+  heartbeat: async () => {
+    const response = await api.post('/pqc/session/heartbeat');
+    return response.data;
+  },
+
+  /**
+   * Close PQC session
+   * @returns {Promise<object>} Logout response
+   */
+  logout: async () => {
+    const response = await api.post('/pqc/session/logout');
+    return response.data;
+  },
+
+  /**
+   * List all active sessions
+   * @returns {Promise<object>} List of sessions
+   */
+  listSessions: async () => {
+    const response = await api.get('/pqc/session/sessions');
+    return response.data;
+  }
+};
+
+// ============================================
 // Health Check
 // ============================================
 export const healthCheck = async () => {
