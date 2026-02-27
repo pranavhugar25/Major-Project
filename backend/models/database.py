@@ -16,6 +16,20 @@ class User(db.Model):
     username = db.Column(db.String(255), unique=True, nullable=False, index=True)
     master_password_hash = db.Column(db.String(512), nullable=False)
     salt = db.Column(db.String(512), nullable=False)
+    
+    # OPRF (Oblivious PRF) seed for PAKE authentication
+    # This allows quantum-resistant password authentication
+    oprf_seed = db.Column(db.String(512), nullable=True)
+    
+    # OPRF verifier for password authentication (computed from password + seed)
+    oprf_verifier = db.Column(db.String(512), nullable=True)
+    
+    # PQC (Post-Quantum Cryptography) keys for user
+    # ML-KEM (Kyber) public key for key encapsulation
+    pqc_kyber_public_key = db.Column(db.Text, nullable=True)
+    
+    # ML-DSA (Dilithium) public key for signatures
+    pqc_dilithium_public_key = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -28,6 +42,7 @@ class User(db.Model):
             'userId': str(self.user_id),
             'username': self.username,
             'salt': self.salt,
+            'oprfAvailable': self.oprf_seed is not None,
             'createdAt': self.created_at.isoformat() if self.created_at else None
         }
 

@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for PQC Password Manager
 # Stage 1: Backend
-FROM python:3.11-slim AS backend
+FROM python:3.10.11-slim AS backend
 
 WORKDIR /app/backend
 
@@ -18,14 +18,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 
 # Stage 2: Frontend
-FROM node:18-alpine AS frontend
+FROM node:20-alpine AS frontend
 
 WORKDIR /app/frontend
+
+# Install build tools for native modules
+RUN apk add --no-cache python3 make g++
 
 # Copy frontend source files
 COPY frontend/package*.json ./
 COPY frontend/public ./public
 COPY frontend/src ./src
+COPY frontend/scripts ./scripts
 
 # Install dependencies (using npm install instead of npm ci for flexibility)
 RUN npm install
@@ -34,7 +38,7 @@ RUN npm install
 RUN npm run build
 
 # Stage 3: Production (serving frontend + running backend)
-FROM python:3.11-slim AS production
+FROM python:3.10.11-slim AS production
 
 WORKDIR /app
 
@@ -60,6 +64,12 @@ RUN echo 'server { \
     server_name localhost; \
     root /var/www/html; \
     index index.html; \
+    \
+    # Serve WASM files with correct MIME type \
+    types { \
+        application/wasm wasm; \
+    } \
+    \
     location /api { \
         proxy_pass http://localhost:5000; \
         proxy_http_version 1.1; \

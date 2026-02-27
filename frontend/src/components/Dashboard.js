@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AddPassword from './AddPassword';
 import StoredPasswords from './StoredPasswords';
 import CryptoView from './CryptoView';
+import Benchmark from './Benchmark';
 import '../styles/Dashboard.css';
 
 const VAULT_LOCK_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -116,6 +117,14 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
             <span className="nav-icon">🔧</span>
             <span>Crypto View</span>
           </button>
+
+          <button 
+            className={`nav-item ${currentView === 'benchmark' ? 'active' : ''}`}
+            onClick={() => setCurrentView('benchmark')}
+          >
+            <span className="nav-icon">📊</span>
+            <span>Benchmark</span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -151,6 +160,10 @@ function Dashboard({ user, vaultKey, onLogout, onLockVault }) {
 
         {currentView === 'crypto' && (
           <CryptoView user={user} vaultKey={vaultKey} />
+        )}
+
+        {currentView === 'benchmark' && (
+          <Benchmark />
         )}
       </div>
     </div>

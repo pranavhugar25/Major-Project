@@ -174,13 +174,22 @@ export const authAPI = {
    * Register a new user
    * @param {string} username - Username
    * @param {string} masterPassword - Master password
+   * @param {string} pqcPublicKey - Optional PQC public key (ML-KEM-1024)
    * @returns {Promise<object>} Response with userId and salt
    */
-  register: async (username, masterPassword) => {
-    const response = await api.post('/auth/register', {
+  register: async (username, masterPassword, pqcPublicKey = null) => {
+    const payload = {
       username,
       masterPassword
-    });
+    };
+    
+    // Add PQC public key if provided
+    if (pqcPublicKey) {
+      payload.pqcPublicKey = pqcPublicKey;
+      payload.pqcAlgorithm = 'ML-KEM-1024';
+    }
+    
+    const response = await api.post('/auth/register', payload);
     return response.data;
   },
 
@@ -296,6 +305,30 @@ export const passwordAPI = {
    */
   getCryptoView: async () => {
     const response = await api.post('/passwords/get-crypto-view', {});
+    return response.data;
+  }
+};
+
+// ============================================
+// Benchmark APIs
+// ============================================
+export const benchmarkAPI = {
+  /**
+   * Get benchmark status
+   * @returns {Promise<object>} Benchmark availability status
+   */
+  getStatus: async () => {
+    const response = await api.get('/benchmark/status');
+    return response.data;
+  },
+
+  /**
+   * Run benchmark comparison
+   * @param {number} iterations - Number of iterations per test
+   * @returns {Promise<object>} Benchmark results
+   */
+  runBenchmark: async (iterations = 10) => {
+    const response = await api.post('/benchmark/run', { iterations });
     return response.data;
   }
 };

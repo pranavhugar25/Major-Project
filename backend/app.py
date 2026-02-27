@@ -16,6 +16,8 @@ from flask_wtf.csrf import CSRFProtect
 from models.database import db
 from routes.auth import auth_bp
 from routes.passwords import passwords_bp
+from routes.benchmark import benchmark_bp
+from routes.pqc_session import pqc_session_bp
 import os
 import secrets
 import logging
@@ -102,6 +104,8 @@ def create_app(testing: bool = False):
     # Manually exempt the auth and passwords blueprints
     csrf.exempt(auth_bp)
     csrf.exempt(passwords_bp)
+    csrf.exempt(benchmark_bp)
+    csrf.exempt(pqc_session_bp)
     
     # ====================================================================
     # CORS Configuration
@@ -128,6 +132,8 @@ def create_app(testing: bool = False):
     # ====================================================================
     app.register_blueprint(auth_bp)
     app.register_blueprint(passwords_bp)
+    app.register_blueprint(benchmark_bp)
+    app.register_blueprint(pqc_session_bp)
     
     # ====================================================================
     # Create Tables
