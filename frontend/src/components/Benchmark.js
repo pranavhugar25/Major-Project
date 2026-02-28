@@ -13,17 +13,17 @@ const PLACEHOLDER_DATA = {
     name: 'ML-KEM-1024',
     keyGenTime: 0.45, // milliseconds
     encapsulationTime: 0.12, // milliseconds
-    publicKeySize: 1568, // bytes
-    ciphertextSize: 1568, // bytes
-    secretKeySize: 3168, // bytes
+    publicKeySize: 2092, // bytes (ML-KEM-1024)
+    ciphertextSize: 2092, // bytes
+    secretKeySize: 4224, // bytes
   },
   classical: {
-    name: 'RSA-4096',
-    keyGenTime: 1250, // milliseconds (significantly slower)
-    encapsulationTime: 45, // milliseconds (for encryption/decryption)
-    publicKeySize: 512, // bytes
-    ciphertextSize: 512, // bytes
-    secretKeySize: 512, // bytes
+    name: 'X25519 (ECC)',
+    keyGenTime: 0.03, // milliseconds (very fast)
+    keyExchangeTime: 0.06, // milliseconds (ECDH)
+    publicKeySize: 32, // bytes
+    secretKeySize: 32, // bytes
+    sharedSecretSize: 32, // bytes
   }
 };
 
@@ -98,15 +98,16 @@ function Benchmark() {
         
         if (data.classical && !data.classical_error) {
           transformedResults.classical = {
-            name: data.classical.algorithm || 'RSA-4096',
+            name: data.classical.algorithm || 'X25519 (ECC)',
             keyGenTime: data.classical.key_generation.mean,
-            encryptionTime: data.classical.encryption.mean,
-            decryptionTime: data.classical.decryption.mean,
+            keyExchangeTime: data.classical.key_exchange?.mean,
+            encryptionTime: data.classical.key_exchange?.mean, // Use key exchange for ECC
+            decryptionTime: data.classical.key_exchange?.mean,
             publicKeySize: data.classical.key_sizes.public_key,
             secretKeySize: data.classical.key_sizes.private_key,
-            ciphertextSize: data.classical.key_sizes.ciphertext,
+            ciphertextSize: data.classical.key_sizes.shared_secret || data.classical.key_sizes.ciphertext,
             keyGenStdev: data.classical.key_generation.stdev,
-            encryptStdev: data.classical.encryption.stdev
+            encryptStdev: data.classical.key_exchange?.stdev
           };
         }
         
@@ -192,7 +193,7 @@ function Benchmark() {
       <div className="content-header">
         <h1>PQC Benchmark</h1>
         <p className="subtitle">
-          Compare Post-Quantum Cryptography (ML-KEM-1024) vs Classical (RSA-4096) performance
+          Compare Post-Quantum Cryptography (ML-KEM-1024) vs Classical (X25519 ECC) performance
         </p>
       </div>
 
@@ -272,7 +273,7 @@ function Benchmark() {
               {results.classical && (
                 <div className="bar-row">
                   <div className="bar-label">
-                    <span className="algo-name">Classical (RSA-4096)</span>
+                    <span className="algo-name">Classical (X25519 ECC)</span>
                     <span className="algo-badge classical">Classical</span>
                   </div>
                   <div className="bar-container">
@@ -296,9 +297,14 @@ function Benchmark() {
             
             {results.pqc && results.classical && (
               <div className="speedup-info">
-                <span className="speedup-label">PQC Speedup:</span>
+                <span className="speedup-label">PQC vs Classical:</span>
                 <span className="speedup-value">
-                  {(results.classical.keyGenTime / results.pqc.keyGenTime).toFixed(0)}x faster
+                  {(() => {
+                    const ratio = results.classical.keyGenTime / results.pqc.keyGenTime;
+                    if (ratio > 1) return `${ratio.toFixed(1)}x faster`;
+                    if (ratio < 1) return `${(1/ratio).toFixed(1)}x slower`;
+                    return 'same speed';
+                  })()}
                 </span>
               </div>
             )}
@@ -333,8 +339,8 @@ function Benchmark() {
               {results.classical && (
                 <div className="bar-row">
                   <div className="bar-label">
-                    <span className="algo-name">Classical (RSA-4096)</span>
-                    <span className="algo-badge classical">Encryption</span>
+                    <span className="algo-name">Classical (X25519 ECC)</span>
+                    <span className="algo-badge classical">Key Exchange</span>
                   </div>
                   <div className="bar-container">
                     <div 
@@ -350,9 +356,15 @@ function Benchmark() {
             
             {results.pqc && results.classical && (
               <div className="speedup-info">
-                <span className="speedup-label">PQC Speedup:</span>
+                <span className="speedup-label">PQC vs Classical:</span>
                 <span className="speedup-value">
-                  {(results.classical.encryptionTime / (results.pqc.encapsulationTime || results.pqc.decapsulationTime)).toFixed(0)}x faster
+                  {(() => {
+                    const pqcTime = results.pqc.encapsulationTime || results.pqc.decapsulationTime;
+                    const ratio = results.classical.encryptionTime / pqcTime;
+                    if (ratio > 1) return `${ratio.toFixed(1)}x faster`;
+                    if (ratio < 1) return `${(1/ratio).toFixed(1)}x slower`;
+                    return 'same speed';
+                  })()}
                 </span>
               </div>
             )}
@@ -458,7 +470,7 @@ function Benchmark() {
               {results.classical && (
                 <div className="summary-card classical">
                   <div className="summary-icon">🔒</div>
-                  <h3>RSA-4096 (Classical)</h3>
+                  <h3>X25519 (ECC) (Classical)</h3>
                   <ul>
                     <li>⚠ {formatTime(results.classical.keyGenTime)} key generation</li>
                     <li>⚠ {formatTime(results.classical.encryptionTime)} encryption</li>

@@ -1,9 +1,12 @@
+# Docker Compose for PQC Password Manager Backend
+# Run with: docker-compose up --build -d
+# The frontend runs separately with npm (npm start in frontend directory)
+
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-      target: backend
     container_name: pqc-backend
     env_file:
       - .env
@@ -17,49 +20,6 @@ services:
     networks:
       - pqc-network
 
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: frontend
-    container_name: pqc-frontend
-    volumes:
-      - ./frontend:/app/frontend
-      - node_modules:/app/frontend/node_modules
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:5000/api
-    working_dir: /app/frontend
-    command: npm start
-    depends_on:
-      - backend
-    networks:
-      - pqc-network
-
-  # Test runner - run with: docker-compose run --rm test
-  test:
-    image: mcr.microsoft.com/playwright:v1.58.2-jammy
-    container_name: pqc-test
-    working_dir: /app
-    volumes:
-      - ./tests:/app/tests
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - CI=true
-    command: sh -c "npm init -y && npm install @playwright/test && npx playwright test --reporter=list"
-    depends_on:
-      - frontend
-    profiles:
-      - test
-    networks:
-      - pqc-network
-
 networks:
   pqc-network:
     driver: bridge
-
-volumes:
-  backend_venv:
-  node_modules:

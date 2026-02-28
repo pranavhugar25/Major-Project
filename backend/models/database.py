@@ -17,6 +17,10 @@ class User(db.Model):
     master_password_hash = db.Column(db.String(512), nullable=False)
     salt = db.Column(db.String(512), nullable=False)
     
+    # SPAKE2 verifier for PAKE authentication
+    spake2_verifier = db.Column(db.String(512), nullable=True)
+    spake2_salt = db.Column(db.String(512), nullable=True)
+    
     # OPRF (Oblivious PRF) seed for PAKE authentication
     # This allows quantum-resistant password authentication
     oprf_seed = db.Column(db.String(512), nullable=True)
@@ -43,6 +47,7 @@ class User(db.Model):
             'username': self.username,
             'salt': self.salt,
             'oprfAvailable': self.oprf_seed is not None,
+            'spake2Available': self.spake2_verifier is not None,
             'createdAt': self.created_at.isoformat() if self.created_at else None
         }
 

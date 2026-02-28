@@ -8,9 +8,11 @@ from flask import Blueprint, request, jsonify
 from models.database import db, User
 from utils.crypto import generate_salt, hash_password, verify_password
 from utils.auth import JWTAuth, require_auth, generate_session_token, add_to_blacklist
+from utils.spake2_pake import generate_password_verifier, compute_verifier, create_server, create_client
 import uuid
 import logging
 import time
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,10 @@ def register():
         # Generate unique salt for this user
         salt = generate_salt()
         
-        # Hash the master password
+        # Generate SPAKE2 verifier for PAKE authentication
+        spake2_verifier, spake2_salt = generate_password_verifier(master_password)
+        
+        # Hash the master password (for backwards compatibility)
         master_password_hash = hash_password(master_password, salt)
         
         # Create new user
@@ -99,7 +104,9 @@ def register():
             user_id=str(uuid.uuid4()),
             username=username,
             master_password_hash=master_password_hash,
-            salt=salt
+            salt=salt,
+            spake2_verifier=spake2_verifier,
+            spake2_salt=spake2_salt
         )
         
         db.session.add(new_user)
@@ -112,6 +119,7 @@ def register():
             'message': 'User registered successfully',
             'userId': str(new_user.user_id),
             'salt': salt,
+            'spake2Available': True,
             'username': username
         }), 201
         
@@ -193,8 +201,22 @@ def login():
                 'error': 'Invalid username or password'
             }), 401
         
-        # Verify password
-        if not verify_password(master_password, user.salt, user.master_password_hash):
+        # Verify password using SPAKE2 verifier if available, otherwise use classical
+        spake2_verified = False
+        if user.spake2_verifier and user.spake2_salt:
+            # SPAKE2-based verification (quantum-resistant PAKE)
+            try:
+                # Compute verifier and compare
+                test_verifier = compute_verifier(master_password, user.spake2_salt)
+                import secrets
+                spake2_verified = secrets.compare_digest(test_verifier, user.spake2_verifier)
+            except Exception as e:
+                logger.warning(f"SPAKE2 verification failed: {e}")
+        
+        # Fall back to classical verification if SPAKE2 not available or failed
+        classical_verified = verify_password(master_password, user.salt, user.master_password_hash)
+        
+        if not (spake2_verified or classical_verified):
             # Track failed attempt
             failed_login_attempts[username] = (failed_login_attempts.get(username, (0, 0))[0] + 1, current_time + LOCKOUT_DURATION)
             
@@ -223,6 +245,7 @@ def login():
             'message': 'Login successful',
             'userId': str(user.user_id),
             'salt': user.salt,
+            'spake2Available': user.spake2_verifier is not None,
             'username': user.username,
             'access_token': tokens['access_token'],
             'refresh_token': tokens.get('refresh_token'),

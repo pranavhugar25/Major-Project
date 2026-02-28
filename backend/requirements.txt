@@ -15,6 +15,9 @@ pycryptodome==3.19.0
 # Post-Quantum Cryptography (liboqs)
 liboqs-python==0.14.1
 
+# PAKE (Password-Authenticated Key Exchange)
+spake2>=0.8
+
 # Authentication
 PyJWT==2.8.0
 

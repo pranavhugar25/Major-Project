@@ -24,24 +24,22 @@ A secure, web-based password management system designed to protect user credenti
 
 ## 🚀 Quick Start
 
+This project uses a hybrid setup: **backend runs in Docker**, **frontend runs with npm**.
+
 ### Prerequisites
 - Node.js 18+ and npm
-- Python 3.10+
-- pip and virtualenv
+- Docker and Docker Compose
 
-### Backend Setup
+### Backend Setup (Docker)
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
+# Start the backend using Docker Compose
+docker-compose up --build -d
 ```
 
 The backend will run on `http://localhost:5000`
 
-### Frontend Setup
+### Frontend Setup (npm)
 
 ```bash
 cd frontend

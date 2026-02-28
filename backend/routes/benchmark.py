@@ -9,10 +9,10 @@ from utils.pqc import PQCKeyManager, PQCUnavailableError
 
 benchmark_bp = Blueprint('benchmark', __name__)
 
-# Classical RSA implementation using pycryptodome
+# Classical ECC implementation using cryptography library (X25519)
 try:
-    from Crypto.PublicKey import RSA
-    from Crypto.Cipher import PKCS1_OAEP
+    from cryptography.hazmat.primitives.asymmetric import x25519
+    from cryptography.hazmat.primitives import serialization
     CLASSICAL_AVAILABLE = True
 except ImportError:
     CLASSICAL_AVAILABLE = False
@@ -84,41 +84,47 @@ def _run_pqc_benchmark(iterations=10):
 
 
 def _run_classical_benchmark(iterations=10):
-    """Run Classical RSA benchmarks"""
+    """Run Classical ECC (X25519) benchmarks - modern standard for key exchange"""
     if not CLASSICAL_AVAILABLE:
-        raise Exception("pycryptodome is not available")
+        raise Exception("cryptography library is not available")
     
-    # Key Generation benchmark
+    # Key Generation benchmark (X25519)
     key_gen_times = []
     for _ in range(iterations):
         start = time.perf_counter()
-        key = RSA.generate(4096)
+        private_key = x25519.X25519PrivateKey.generate()
         end = time.perf_counter()
         key_gen_times.append((end - start) * 1000)
     
-    # Encryption benchmark (using public key)
-    encrypt_times = []
+    # Key Exchange benchmark (ECDH)
+    exchange_times = []
     for _ in range(iterations):
-        key = RSA.generate(4096)
-        cipher = PKCS1_OAEP.new(key.publickey())
-        message = b"test message" * 20  # ~240 bytes
+        # Generate both sides of the key exchange
+        alice_private = x25519.X25519PrivateKey.generate()
+        bob_private = x25519.X25519PrivateKey.generate()
+        
+        alice_public = alice_private.public_key()
+        bob_public = bob_private.public_key()
+        
         start = time.perf_counter()
-        ciphertext = cipher.encrypt(message)
+        # Both derive the same shared secret
+        alice_shared = alice_private.exchange(bob_public)
+        bob_shared = bob_private.exchange(alice_public)
         end = time.perf_counter()
-        encrypt_times.append((end - start) * 1000)
+        exchange_times.append((end - start) * 1000)
     
-    # Decryption benchmark (using private key)
-    decrypt_times = []
-    for _ in range(iterations):
-        key = RSA.generate(4096)
-        cipher = PKCS1_OAEP.new(key.publickey())
-        message = b"test message" * 20
-        ciphertext = cipher.encrypt(message)
-        decipher = PKCS1_OAEP.new(key)
-        start = time.perf_counter()
-        _ = decipher.decrypt(ciphertext)
-        end = time.perf_counter()
-        decrypt_times.append((end - start) * 1000)
+    # Get public key sizes
+    test_private = x25519.X25519PrivateKey.generate()
+    test_public = test_private.public_key()
+    public_key_bytes = test_public.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+    private_key_bytes = test_private.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption()
+    )
     
     return {
         "key_generation": {
@@ -129,26 +135,18 @@ def _run_classical_benchmark(iterations=10):
             "max": max(key_gen_times),
             "iterations": iterations
         },
-        "encryption": {
-            "mean": statistics.mean(encrypt_times),
-            "median": statistics.median(encrypt_times),
-            "stdev": statistics.stdev(encrypt_times) if len(encrypt_times) > 1 else 0,
-            "min": min(encrypt_times),
-            "max": max(encrypt_times),
-            "iterations": iterations
-        },
-        "decryption": {
-            "mean": statistics.mean(decrypt_times),
-            "median": statistics.median(decrypt_times),
-            "stdev": statistics.stdev(decrypt_times) if len(decrypt_times) > 1 else 0,
-            "min": min(decrypt_times),
-            "max": max(decrypt_times),
+        "key_exchange": {
+            "mean": statistics.mean(exchange_times),
+            "median": statistics.median(exchange_times),
+            "stdev": statistics.stdev(exchange_times) if len(exchange_times) > 1 else 0,
+            "min": min(exchange_times),
+            "max": max(exchange_times),
             "iterations": iterations
         },
         "key_sizes": {
-            "public_key": (key.n.bit_length() // 8) + 4,  # Approximate size
-            "private_key": (key.n.bit_length() // 8) + 4,
-            "ciphertext": len(ciphertext)
+            "public_key": len(public_key_bytes),
+            "private_key": len(private_key_bytes),
+            "shared_secret": 32  # X25519 always produces 32-byte shared secret
         }
     }
 
@@ -189,7 +187,7 @@ def run_benchmark():
     if CLASSICAL_AVAILABLE:
         try:
             results["classical"] = _run_classical_benchmark(iterations)
-            results["classical"]["algorithm"] = "RSA-4096"
+            results["classical"]["algorithm"] = "X25519 (ECC)"
         except Exception as e:
             results["classical_error"] = str(e)
     else:
@@ -215,6 +213,6 @@ def benchmark_status():
         "classical_available": CLASSICAL_AVAILABLE,
         "algorithms": {
             "pqc": "ML-KEM-1024" if PQCKeyManager.is_available() else None,
-            "classical": "RSA-4096" if CLASSICAL_AVAILABLE else None
+            "classical": "X25519 (ECC)" if CLASSICAL_AVAILABLE else None
         }
     }), 200

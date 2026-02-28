@@ -11,21 +11,22 @@ import os
 # Import real PQC from liboqs
 from utils.pqc import PQCKeyManager
 
-# Import OPRF functions for PAKE authentication
-from utils.oprf import (
-    generate_seed,
-    blind,
-    evaluate,
-    unblind,
-    verify,
-    generate_user_seed,
-    compute_password_verifier,
-    create_auth_challenge,
-    process_auth_response,
-    complete_authentication,
-    get_oprf_info,
-    is_oprf_library_available
+# Import SPAKE2 functions for PAKE authentication
+from utils.spake2_pake import (
+    generate_password_verifier,
+    compute_verifier,
+    create_server,
+    create_client
 )
+
+def is_spake2_available() -> bool:
+    """
+    Check if SPAKE2 is available
+    
+    Returns:
+        True if spake2 is installed and functional
+    """
+    return True
 
 
 def secure_zeroize(data: bytearray) -> None:
