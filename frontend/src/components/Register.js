@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
 import { deriveVaultKey, calculatePasswordStrength } from '../utils/crypto';
+import { setAuthTokens } from '../utils/api';
 import { 
   initPQC,
   isPQCAvailable,
@@ -98,6 +99,13 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
       const response = await authAPI.register(username, masterPassword, keypair.publicKey);
 
       if (response.success) {
+        // Store JWT tokens for API authentication
+        setAuthTokens({
+          access_token: response.access_token,
+          refresh_token: response.refresh_token,
+          expires_in: response.expires_in
+        });
+        
         // Derive vault key client-side
         const vaultKey = await deriveVaultKey(masterPassword, response.salt);
 

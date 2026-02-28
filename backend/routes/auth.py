@@ -114,13 +114,20 @@ def register():
         
         logger.info(f"New user registered: {username}")
         
+        # Generate JWT tokens for immediate login
+        tokens = JWTAuth.create_token_pair(str(new_user.user_id))
+        
         return jsonify({
             'success': True,
             'message': 'User registered successfully',
             'userId': str(new_user.user_id),
             'salt': salt,
             'spake2Available': True,
-            'username': username
+            'username': username,
+            'access_token': tokens['access_token'],
+            'refresh_token': tokens.get('refresh_token'),
+            'token_type': tokens['token_type'],
+            'expires_in': tokens['expires_in']
         }), 201
         
     except Exception as e:
