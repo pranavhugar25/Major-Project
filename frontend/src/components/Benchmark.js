@@ -493,29 +493,81 @@ function Benchmark() {
                   height={lineHeight}
                   className="line-grid-bg"
                 />
-                <line x1={linePadding} y1={linePadding} x2={linePadding} y2={lineHeight - linePadding} className="axis-line" />
-                <line x1={linePadding} y1={lineHeight - linePadding} x2={lineWidth - linePadding} y2={lineHeight - linePadding} className="axis-line" />
+                <line
+                  x1={linePadding}
+                  y1={linePadding}
+                  x2={linePadding}
+                  y2={lineHeight - linePadding}
+                  className="axis-line"
+                />
+                <line
+                  x1={linePadding}
+                  y1={lineHeight - linePadding}
+                  x2={lineWidth - linePadding}
+                  y2={lineHeight - linePadding}
+                  className="axis-line"
+                />
                 {yAxisTicks.map((tick) => {
-                  const y = lineHeight - linePadding - (lineHeight - linePadding * 2) * tick.fraction;
+                  const y =
+                    lineHeight -
+                    linePadding -
+                    (lineHeight - linePadding * 2) * tick.fraction;
                   return (
                     <g key={`y-tick-${tick.fraction}`}>
-                      <line x1={linePadding} y1={y} x2={lineWidth - linePadding} y2={y} className="line-grid" />
-                      <line x1={linePadding - 4} y1={y} x2={linePadding} y2={y} className="axis-tick" />
-                      <text x={linePadding - 8} y={y + 4} textAnchor="end" className="axis-text axis-text-y">
+                      <line
+                        x1={linePadding}
+                        y1={y}
+                        x2={lineWidth - linePadding}
+                        y2={y}
+                        className="line-grid"
+                      />
+                      <line
+                        x1={linePadding - 4}
+                        y1={y}
+                        x2={linePadding}
+                        y2={y}
+                        className="axis-tick"
+                      />
+                      <text
+                        x={linePadding - 8}
+                        y={y + 4}
+                        textAnchor="end"
+                        className="axis-text axis-text-y"
+                      >
                         {tick.label}
                       </text>
                     </g>
                   );
                 })}
                 {scalability.map((point) => {
-                  const minIteration = Math.min(...scalability.map((item) => item.iterations));
-                  const maxIteration = Math.max(...scalability.map((item) => item.iterations));
-                  const xScale = maxIteration === minIteration ? 0.5 : (point.iterations - minIteration) / (maxIteration - minIteration);
-                  const x = linePadding + xScale * (lineWidth - linePadding * 2);
+                  const minIteration = Math.min(
+                    ...scalability.map((item) => item.iterations),
+                  );
+                  const maxIteration = Math.max(
+                    ...scalability.map((item) => item.iterations),
+                  );
+                  const xScale =
+                    maxIteration === minIteration
+                      ? 0.5
+                      : (point.iterations - minIteration) /
+                        (maxIteration - minIteration);
+                  const x =
+                    linePadding + xScale * (lineWidth - linePadding * 2);
                   return (
                     <g key={`x-tick-${point.iterations}`}>
-                      <line x1={x} y1={lineHeight - linePadding} x2={x} y2={lineHeight - linePadding + 4} className="axis-tick" />
-                      <text x={x} y={lineHeight - 6} textAnchor="middle" className="axis-text axis-text-x">
+                      <line
+                        x1={x}
+                        y1={lineHeight - linePadding}
+                        x2={x}
+                        y2={lineHeight - linePadding + 4}
+                        className="axis-tick"
+                      />
+                      <text
+                        x={x}
+                        y={lineHeight - 6}
+                        textAnchor="middle"
+                        className="axis-text axis-text-x"
+                      >
                         {point.iterations}
                       </text>
                     </g>
@@ -581,7 +633,9 @@ function Benchmark() {
                 >
                   <span>{formatPercent(reqCpu)}</span>
                 </div>
-                <p>Peak request memory: {formatSize(requestMemoryPeakDisplay)}</p>
+                <p>
+                  Peak request memory: {formatSize(requestMemoryPeakDisplay)}
+                </p>
               </div>
 
               <div className="doughnut-card">

@@ -6,7 +6,7 @@ JWT-based session management for secure API authentication.
 """
 from flask import Blueprint, request, jsonify
 from models.database import db, User
-from utils.crypto import generate_salt, hash_password, verify_password
+from utils.crypto import generate_salt, hash_password, verify_password_with_algorithm
 from utils.auth import JWTAuth, require_auth, generate_session_token, add_to_blacklist
 from utils.spake2_pake import generate_password_verifier, compute_verifier, create_server, create_client
 import uuid
@@ -96,7 +96,7 @@ def register():
         # Generate SPAKE2 verifier for PAKE authentication
         spake2_verifier, spake2_salt = generate_password_verifier(master_password)
         
-        # Hash the master password (for backwards compatibility)
+        # Hash the master password using the current Argon2id implementation.
         master_password_hash = hash_password(master_password, salt)
         
         # Create new user
@@ -221,8 +221,12 @@ def login():
                 logger.warning(f"SPAKE2 verification failed: {e}")
         
         # Fall back to classical verification if SPAKE2 not available or failed
-        classical_verified = verify_password(master_password, user.salt, user.master_password_hash)
-        
+        classical_verified, password_hash_algorithm = verify_password_with_algorithm(
+            master_password,
+            user.salt,
+            user.master_password_hash
+        )
+
         if not (spake2_verified or classical_verified):
             # Track failed attempt
             failed_login_attempts[username] = (failed_login_attempts.get(username, (0, 0))[0] + 1, current_time + LOCKOUT_DURATION)
@@ -240,6 +244,16 @@ def login():
         # Successful login - clear failed attempts
         if username in failed_login_attempts:
             del failed_login_attempts[username]
+
+        # Lazily upgrade legacy PBKDF2 hashes to Argon2id while keeping the same salt
+        if password_hash_algorithm == 'pbkdf2':
+            try:
+                user.master_password_hash = hash_password(master_password, user.salt)
+                db.session.commit()
+                logger.info(f"Upgraded master password hash to Argon2id for user: {username}")
+            except Exception as e:
+                db.session.rollback()
+                logger.warning(f"Failed to upgrade master password hash for {username}: {e}")
         
         # Generate JWT tokens
         tokens = JWTAuth.create_token_pair(str(user.user_id))

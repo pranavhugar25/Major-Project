@@ -2,11 +2,13 @@
 Cryptographic utilities for the backend
 Handles hashing, PQC key generation, OPRF, and verification
 """
-import hashlib
-import secrets
 import base64
-from typing import Tuple, Optional
+import hashlib
 import os
+import secrets
+from typing import Optional, Tuple
+
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 # Import real PQC from liboqs
 from utils.pqc import PQCKeyManager
@@ -55,10 +57,43 @@ def generate_salt(length: int = 32) -> str:
     return base64.b64encode(salt_bytes).decode('utf-8')
 
 
+ARGON2ID_LENGTH = 32
+ARGON2ID_ITERATIONS = 3
+ARGON2ID_MEMORY_COST = 64 * 1024
+ARGON2ID_LANES = 4
+PBKDF2_ITERATIONS = 600000
+PBKDF2_LENGTH = 32
+
+
+def _derive_argon2id_key(password: str, salt_bytes: bytes) -> bytes:
+    """Derive a master-password hash using Argon2id."""
+    kdf = Argon2id(
+        salt=salt_bytes,
+        length=ARGON2ID_LENGTH,
+        iterations=ARGON2ID_ITERATIONS,
+        lanes=ARGON2ID_LANES,
+        memory_cost=ARGON2ID_MEMORY_COST,
+    )
+    return kdf.derive(password.encode('utf-8'))
+
+
+def _derive_pbkdf2_key(password: str, salt_bytes: bytes) -> bytes:
+    """Derive the legacy master-password hash using PBKDF2-HMAC-SHA256."""
+    return hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt_bytes,
+        iterations=PBKDF2_ITERATIONS,
+        dklen=PBKDF2_LENGTH,
+    )
+
+
 def hash_password(password: str, salt: str) -> str:
     """
-    Hash password using PBKDF2-HMAC-SHA256
-    This is used to verify the master password on the server
+    Hash password using Argon2id.
+
+    This is the primary master-password hashing algorithm used for new
+    registrations and password upgrades.
     
     Args:
         password: Plain text password
@@ -68,17 +103,42 @@ def hash_password(password: str, salt: str) -> str:
         Base64 encoded password hash
     """
     salt_bytes = base64.b64decode(salt)
-    
-    # PBKDF2 with 600,000 iterations (OWASP recommendation for 2024)
-    password_hash = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt_bytes,
-        iterations=600000,
-        dklen=32
-    )
-    
+
+    password_hash = _derive_argon2id_key(password, salt_bytes)
+
     return base64.b64encode(password_hash).decode('utf-8')
+
+
+def verify_password_with_algorithm(password: str, salt: str, stored_hash: str) -> Tuple[bool, Optional[str]]:
+    """
+    Verify password against the stored hash.
+
+    Returns:
+        A tuple of (is_valid, algorithm_name). The algorithm name is
+        'argon2id' or 'pbkdf2' when verification succeeds.
+    """
+    salt_bytes = base64.b64decode(salt)
+
+    try:
+        stored_hash_bytes = base64.b64decode(stored_hash)
+    except Exception:
+        return False, None
+
+    try:
+        argon2id_hash = _derive_argon2id_key(password, salt_bytes)
+        if secrets.compare_digest(argon2id_hash, stored_hash_bytes):
+            return True, 'argon2id'
+    except Exception:
+        pass
+
+    try:
+        pbkdf2_hash = _derive_pbkdf2_key(password, salt_bytes)
+        if secrets.compare_digest(pbkdf2_hash, stored_hash_bytes):
+            return True, 'pbkdf2'
+    except Exception:
+        pass
+
+    return False, None
 
 
 def verify_password(password: str, salt: str, stored_hash: str) -> bool:
@@ -93,8 +153,8 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
     Returns:
         True if password matches, False otherwise
     """
-    computed_hash = hash_password(password, salt)
-    return secrets.compare_digest(computed_hash, stored_hash)
+    is_valid, _ = verify_password_with_algorithm(password, salt, stored_hash)
+    return is_valid
 
 
 # ============================================================================

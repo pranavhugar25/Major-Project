@@ -201,8 +201,9 @@ def create_app(testing: bool = False):
             'security_features': [
                 'Zero-Knowledge Architecture',
                 'Client-side AES-256-GCM encryption',
-                'Post-Quantum Cryptography (ML-KEM-768, ML-DSA-65)',
-                'PBKDF2 key derivation (600k iterations)',
+                'Post-Quantum Cryptography (ML-KEM-1024, ML-DSA-87)',
+                'Argon2id master-password hashing (server-side)',
+                'PBKDF2 vault-key derivation (client-side, 600k iterations)',
                 'JWT authentication (15-min expiry)',
                 'Rate limiting',
                 'CSRF protection'
