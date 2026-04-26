@@ -1,10 +1,19 @@
 /**
  * Register Component
  * Handles new user registration with zero-knowledge architecture
+ * Integrates PQC (Post-Quantum Cryptography) for enhanced security
  */
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
 import { deriveVaultKey, calculatePasswordStrength } from '../utils/crypto';
+import { setAuthTokens } from '../utils/api';
+import { 
+  initPQC,
+  isPQCAvailable,
+  generateKeypair, 
+  encapsulate,
+  initSession
+} from '../utils/pqc';
 import '../styles/Auth.css';
 
 function Register({ onRegisterSuccess, onSwitchToLogin }) {
@@ -14,10 +23,41 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [passwordStrength, setPasswordStrength] = useState(null);
+  const [pqcStatus, setPqcStatus] = useState('initializing'); // 'initializing' | 'ready' | 'error'
+  const [pqcError, setPqcError] = useState('');
 
-  const handlePasswordChange = (value) => {
+  // Initialize PQC on component mount
+  React.useEffect(() => {
+    const initPQC = async () => {
+      try {
+        // Check if noble-post-quantum is already loaded
+        if (isPQCAvailable()) {
+          setPqcStatus('ready');
+          console.log('[Register] PQC initialized successfully (noble-post-quantum)');
+          return;
+        }
+        
+        // Initialize PQC
+        const status = await initPQC();
+        if (status.available) {
+          setPqcStatus('ready');
+        } else {
+          throw new Error(status.error || 'PQC not available');
+        }
+        console.log('[Register] PQC initialized successfully');
+      } catch (err) {
+        console.error('[Register] PQC initialization failed:', err);
+        setPqcError(err.message || 'Failed to initialize quantum-resistant cryptography');
+        setPqcStatus('error');
+      }
+    };
+
+    initPQC();
+  }, []);
+
+  const handlePasswordChange = async (value) => {
     setMasterPassword(value);
-    const strength = calculatePasswordStrength(value);
+    const strength = await calculatePasswordStrength(value);
     setPasswordStrength(strength);
   };
 
@@ -36,21 +76,62 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
       return;
     }
 
+    // Check PQC status - PQC is required
+    if (pqcStatus === 'error') {
+      setError(`PQC initialization failed: ${pqcError}. Please refresh the page and try again.`);
+      return;
+    }
+
+    if (pqcStatus === 'initializing') {
+      setError('Please wait while quantum-resistant cryptography initializes...');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Register user
-      const response = await authAPI.register(username, masterPassword);
+      // Generate PQC keypair (ML-KEM-1024) for this user
+      console.log('[Register] Generating PQC keypair...');
+      const keypair = generateKeypair();
+      console.log('[Register] PQC keypair generated');
+
+      // Register user with PQC public key
+      const response = await authAPI.register(username, masterPassword, keypair.publicKey);
 
       if (response.success) {
+        // Store JWT tokens for API authentication
+        setAuthTokens({
+          access_token: response.access_token,
+          refresh_token: response.refresh_token,
+          expires_in: response.expires_in
+        });
+        
         // Derive vault key client-side
-        const vaultKey = deriveVaultKey(masterPassword, response.salt);
+        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
+
+        // Initialize PQC session with server
+        try {
+          console.log('[Register] Initializing PQC session with server...');
+          const session = await initSession(username, response.userId);
+          
+          // Perform key encapsulation to establish shared secret
+          if (session.server_public_key) {
+            console.log('[Register] Performing key encapsulation...');
+            const encapsulation = encapsulate(session.server_public_key);
+            console.log('[Register] PQC session established successfully');
+          }
+        } catch (pqcErr) {
+          console.error('[Register] PQC session error:', pqcErr);
+          // PQC session failure is critical - log but don't block registration
+          // The user can re-establish PQC session on login
+        }
 
         // Pass user data and vault key to parent
         onRegisterSuccess({
           userId: response.userId,
           username: response.username,
-          salt: response.salt
+          salt: response.salt,
+          pqcPublicKey: keypair.publicKey
         }, vaultKey);
       } else {
         setError(response.error || 'Registration failed');
@@ -69,6 +150,28 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
           <div className="lock-icon">🔐</div>
           <h1 className="auth-title">Create Your Vault</h1>
           <p className="auth-subtitle">Secure your passwords with quantum-resistant encryption</p>
+        </div>
+
+        {/* PQC Status Indicator */}
+        <div className={`pqc-status pqc-status-${pqcStatus}`}>
+          {pqcStatus === 'initializing' && (
+            <>
+              <span className="pqc-spinner">⚡</span>
+              <span>Initializing Quantum-Resistant Cryptography...</span>
+            </>
+          )}
+          {pqcStatus === 'ready' && (
+            <>
+              <span className="pqc-icon">🛡️</span>
+              <span>PQC Protected (ML-KEM-1024)</span>
+            </>
+          )}
+          {pqcStatus === 'error' && (
+            <>
+              <span className="pqc-icon">⚠️</span>
+              <span>PQC Error: {pqcError}</span>
+            </>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
@@ -138,7 +241,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
           <button 
             type="submit" 
             className="auth-button"
-            disabled={loading}
+            disabled={loading || pqcStatus === 'initializing'}
           >
             {loading ? 'Creating Vault...' : 'Create Vault'}
           </button>

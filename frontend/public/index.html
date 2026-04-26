@@ -8,10 +8,26 @@
       name="description"
       content="Zero-Knowledge Post-Quantum Cryptography Password Manager - Secure your passwords with quantum-resistant encryption"
     />
+    <!-- Security Meta Tags -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block" />
+    <meta
+      name="referrer"
+      content="strict-origin-when-cross-origin"
+    />
     <title>PQC Vault - Quantum-Resistant Password Manager</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
+    <!-- PQC Library - Standalone browser build -->
+    <script src="%PUBLIC_URL%/noble-post-quantum.js"></script>
+    <script>
+      // Expose noblePostQuantum to window for React components
+      if (typeof noblePostQuantum !== 'undefined') {
+        window.noblePostQuantum = noblePostQuantum;
+      }
+    </script>
   </body>
 </html>

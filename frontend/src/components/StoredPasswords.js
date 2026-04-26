@@ -2,7 +2,7 @@
  * StoredPasswords Component
  * Display and manage stored encrypted passwords
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { passwordAPI } from '../utils/api';
 import { decryptPassword } from '../utils/crypto';
 import '../styles/StoredPasswords.css';
@@ -13,6 +13,7 @@ function StoredPasswords({ user, vaultKey }) {
   const [error, setError] = useState('');
   const [revealedPasswords, setRevealedPasswords] = useState({});
   const [copiedId, setCopiedId] = useState(null);
+  const clipboardClearTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchPasswords();
@@ -20,23 +21,30 @@ function StoredPasswords({ user, vaultKey }) {
 
   const fetchPasswords = async () => {
     try {
+      console.log('FetchPasswords - userId:', user.userId);
       const response = await passwordAPI.getAllPasswords(user.userId);
+      console.log('FetchPasswords - response:', response);
       
       if (response.success) {
+        console.log('FetchPasswords - passwords count:', response.passwords?.length);
         setPasswords(response.passwords || []);
       } else {
         setError(response.error || 'Failed to fetch passwords');
       }
     } catch (err) {
+      console.error('FetchPasswords - error:', err);
       setError('Failed to load passwords');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRevealPassword = (passwordId, encryptedPassword, iv) => {
+  const handleRevealPassword = async (passwordId, encryptedPassword, iv, authTag) => {
     try {
-      const decrypted = decryptPassword(encryptedPassword, iv, vaultKey);
+      console.log('Decrypt - encryptedLength:', encryptedPassword?.length);
+      console.log('Decrypt - ivLength:', iv?.length);
+      console.log('Decrypt - authTag:', authTag);
+      const decrypted = await decryptPassword(encryptedPassword, iv, authTag || '', vaultKey);
       setRevealedPasswords(prev => ({
         ...prev,
         [passwordId]: decrypted
@@ -54,12 +62,33 @@ function StoredPasswords({ user, vaultKey }) {
     });
   };
 
-  const handleCopyPassword = async (passwordId, encryptedPassword, iv) => {
+  const handleCopyPassword = async (passwordId, encryptedPassword, iv, authTag) => {
     try {
-      const decrypted = decryptPassword(encryptedPassword, iv, vaultKey);
-      await navigator.clipboard.writeText(decrypted);
-      setCopiedId(passwordId);
-      setTimeout(() => setCopiedId(null), 2000);
+      const decrypted = await decryptPassword(encryptedPassword, iv, authTag || '', vaultKey);
+      
+      // Show confirmation dialog
+      const confirmed = window.confirm('Copy password to clipboard? The clipboard will be cleared after 30 seconds for security.');
+      
+      if (confirmed) {
+        await navigator.clipboard.writeText(decrypted);
+        setCopiedId(passwordId);
+        
+        // Clear clipboard after 30 seconds
+        if (clipboardClearTimeoutRef.current) {
+          clearTimeout(clipboardClearTimeoutRef.current);
+        }
+        
+        clipboardClearTimeoutRef.current = setTimeout(async () => {
+          try {
+            await navigator.clipboard.writeText('');
+            setCopiedId(null);
+          } catch (e) {
+            console.error('Failed to clear clipboard');
+          }
+        }, 30000);
+        
+        setTimeout(() => setCopiedId(null), 2000);
+      }
     } catch (err) {
       alert('Failed to copy password');
     }
@@ -150,7 +179,7 @@ function StoredPasswords({ user, vaultKey }) {
                     </button>
                   ) : (
                     <button 
-                      onClick={() => handleRevealPassword(pwd.passwordId, pwd.encryptedPassword, pwd.iv)}
+                      onClick={() => handleRevealPassword(pwd.passwordId, pwd.encryptedPassword, pwd.iv, pwd.authTag)}
                       className="action-button reveal-button"
                       title="Show password"
                     >
@@ -159,7 +188,7 @@ function StoredPasswords({ user, vaultKey }) {
                   )}
 
                   <button 
-                    onClick={() => handleCopyPassword(pwd.passwordId, pwd.encryptedPassword, pwd.iv)}
+                    onClick={() => handleCopyPassword(pwd.passwordId, pwd.encryptedPassword, pwd.iv, pwd.authTag)}
                     className="action-button copy-button"
                     title="Copy password"
                   >

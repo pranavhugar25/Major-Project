@@ -18,13 +18,15 @@ function CryptoView({ user }) {
   const fetchCryptoView = async () => {
     try {
       const response = await passwordAPI.getCryptoView(user.userId);
+      console.log('CryptoView - response:', response);
       
       if (response.success) {
-        setCryptoData(response.cryptoData);
+        setCryptoData(response);
       } else {
         setError(response.error || 'Failed to fetch crypto view');
       }
     } catch (err) {
+      console.error('CryptoView - error:', err);
       setError('Failed to load crypto view');
     } finally {
       setLoading(false);
@@ -70,7 +72,7 @@ function CryptoView({ user }) {
           </div>
 
           <div className="crypto-section">
-            <h2>User Account Data</h2>
+            <h2>User Account Data (PAKE Protected)</h2>
             <div className="data-grid">
               <div className="data-item">
                 <label>Username</label>
@@ -85,9 +87,9 @@ function CryptoView({ user }) {
                 <code className="truncated">{cryptoData.salt}</code>
               </div>
               <div className="data-item">
-                <label>Master Password Hash</label>
-                <code className="truncated">{cryptoData.masterPasswordHash}</code>
-                <small>Server only stores hash, not actual password</small>
+                <label>SPAKE2 Verifier</label>
+                <code className="truncated">{cryptoData.spake2Verifier || 'Not available'}</code>
+                <small>SPAKE2 PAKE verifier for quantum-resistant password authentication</small>
               </div>
             </div>
           </div>

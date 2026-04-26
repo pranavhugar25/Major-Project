@@ -34,8 +34,13 @@ function AddPassword({ user, vaultKey }) {
     setLoading(true);
 
     try {
+      
       // Encrypt password client-side
-      const { encryptedPassword, iv, authTag } = encryptPassword(password, vaultKey);
+      console.log('AddPassword - vaultKey:', vaultKey ? 'present' : 'missing');
+      console.log('AddPassword - password:', password ? 'present' : 'missing');
+      console.log('AddPassword - salt:', user.salt ? 'present' : 'missing');
+      const { encryptedPassword, iv, authTag } = await encryptPassword(password, vaultKey);
+      console.log('AddPassword - encrypted:', { encryptedPassword: !!encryptedPassword, ivLength: iv?.length, authTag: authTag });
 
       // Send encrypted data to server
       const response = await passwordAPI.addPassword({

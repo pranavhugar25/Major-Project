@@ -212,6 +212,15 @@
   font-size: 1.25rem;
 }
 
+.attempt-counter {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-warning);
+  padding: var(--spacing-sm);
+  background: rgba(255, 214, 0, 0.1);
+  border-radius: var(--radius-md);
+}
+
 .auth-button {
   width: 100%;
   padding: 1rem;
@@ -331,5 +340,67 @@
   .badge-item {
     flex-direction: row;
     justify-content: center;
+  }
+}
+
+/* PQC Status Indicator */
+.pqc-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 0.813rem;
+  font-weight: 500;
+  margin-bottom: var(--spacing-lg);
+  transition: all var(--transition-base);
+}
+
+.pqc-status-initializing {
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  color: var(--color-primary);
+}
+
+.pqc-status-ready {
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  color: var(--color-primary);
+}
+
+.pqc-status-connecting {
+  background: rgba(255, 214, 0, 0.1);
+  border: 1px solid rgba(255, 214, 0, 0.3);
+  color: var(--color-warning);
+}
+
+.pqc-status-connected {
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  color: var(--color-success);
+}
+
+.pqc-status-error {
+  background: rgba(255, 82, 82, 0.1);
+  border: 1px solid rgba(255, 82, 82, 0.3);
+  color: var(--color-error);
+}
+
+.pqc-icon {
+  font-size: 1rem;
+}
+
+.pqc-spinner {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
