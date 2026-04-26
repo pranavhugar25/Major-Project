@@ -1,46 +1,12 @@
 """
 Cryptographic utilities for the backend
-Handles hashing, PQC key generation, OPRF, and verification
+Handles hashing, PQC key generation, and verification
 """
-import base64
 import hashlib
-import os
 import secrets
-from typing import Optional, Tuple
-
-from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-
-# Import real PQC from liboqs
-from utils.pqc import PQCKeyManager
-
-# Import SPAKE2 functions for PAKE authentication
-from utils.spake2_pake import (
-    generate_password_verifier,
-    compute_verifier,
-    create_server,
-    create_client
-)
-
-def is_spake2_available() -> bool:
-    """
-    Check if SPAKE2 is available
-    
-    Returns:
-        True if spake2 is installed and functional
-    """
-    return True
-
-
-def secure_zeroize(data: bytearray) -> None:
-    """
-    Securely clear sensitive data from memory
-    
-    Args:
-        data: Bytearray to zeroize
-    """
-    if data:
-        for i in range(len(data)):
-            data[i] = 0
+import base64
+from typing import Tuple, Optional
+import os
 
 
 def generate_salt(length: int = 32) -> str:
@@ -57,43 +23,10 @@ def generate_salt(length: int = 32) -> str:
     return base64.b64encode(salt_bytes).decode('utf-8')
 
 
-ARGON2ID_LENGTH = 32
-ARGON2ID_ITERATIONS = 3
-ARGON2ID_MEMORY_COST = 64 * 1024
-ARGON2ID_LANES = 4
-PBKDF2_ITERATIONS = 600000
-PBKDF2_LENGTH = 32
-
-
-def _derive_argon2id_key(password: str, salt_bytes: bytes) -> bytes:
-    """Derive a master-password hash using Argon2id."""
-    kdf = Argon2id(
-        salt=salt_bytes,
-        length=ARGON2ID_LENGTH,
-        iterations=ARGON2ID_ITERATIONS,
-        lanes=ARGON2ID_LANES,
-        memory_cost=ARGON2ID_MEMORY_COST,
-    )
-    return kdf.derive(password.encode('utf-8'))
-
-
-def _derive_pbkdf2_key(password: str, salt_bytes: bytes) -> bytes:
-    """Derive the legacy master-password hash using PBKDF2-HMAC-SHA256."""
-    return hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt_bytes,
-        iterations=PBKDF2_ITERATIONS,
-        dklen=PBKDF2_LENGTH,
-    )
-
-
 def hash_password(password: str, salt: str) -> str:
     """
-    Hash password using Argon2id.
-
-    This is the primary master-password hashing algorithm used for new
-    registrations and password upgrades.
+    Hash password using PBKDF2-HMAC-SHA256
+    This is used to verify the master password on the server
     
     Args:
         password: Plain text password
@@ -103,42 +36,17 @@ def hash_password(password: str, salt: str) -> str:
         Base64 encoded password hash
     """
     salt_bytes = base64.b64decode(salt)
-
-    password_hash = _derive_argon2id_key(password, salt_bytes)
-
+    
+    # PBKDF2 with 600,000 iterations (OWASP recommendation for 2024)
+    password_hash = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt_bytes,
+        iterations=600000,
+        dklen=32
+    )
+    
     return base64.b64encode(password_hash).decode('utf-8')
-
-
-def verify_password_with_algorithm(password: str, salt: str, stored_hash: str) -> Tuple[bool, Optional[str]]:
-    """
-    Verify password against the stored hash.
-
-    Returns:
-        A tuple of (is_valid, algorithm_name). The algorithm name is
-        'argon2id' or 'pbkdf2' when verification succeeds.
-    """
-    salt_bytes = base64.b64decode(salt)
-
-    try:
-        stored_hash_bytes = base64.b64decode(stored_hash)
-    except Exception:
-        return False, None
-
-    try:
-        argon2id_hash = _derive_argon2id_key(password, salt_bytes)
-        if secrets.compare_digest(argon2id_hash, stored_hash_bytes):
-            return True, 'argon2id'
-    except Exception:
-        pass
-
-    try:
-        pbkdf2_hash = _derive_pbkdf2_key(password, salt_bytes)
-        if secrets.compare_digest(pbkdf2_hash, stored_hash_bytes):
-            return True, 'pbkdf2'
-    except Exception:
-        pass
-
-    return False, None
 
 
 def verify_password(password: str, salt: str, stored_hash: str) -> bool:
@@ -153,120 +61,153 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
     Returns:
         True if password matches, False otherwise
     """
-    is_valid, _ = verify_password_with_algorithm(password, salt, stored_hash)
-    return is_valid
+    computed_hash = hash_password(password, salt)
+    return secrets.compare_digest(computed_hash, stored_hash)
 
 
-# ============================================================================
-# Post-Quantum Cryptography - Real Implementation using liboqs
-# ============================================================================
-# These functions provide the real PQC operations using ML-KEM-1024 and
-# ML-DSA-87 from the liboqs library (NIST-standardized).
-# 
-# See utils/pqc.py for the full implementation.
-# ============================================================================
-
-def generate_kyber_keypair() -> Tuple[str, str]:
+class PQCKeyManager:
     """
-    Generate ML-KEM-1024 key pair for key encapsulation
+    Manager for Post-Quantum Cryptography keys
+    Handles ML-KEM (Kyber) and ML-DSA (Dilithium) key generation
     
-    Returns:
-        Tuple of (public_key, private_key) as base64 strings
+    Note: This is a simplified implementation for demonstration.
+    In production, use actual PQC libraries like liboqs or pqcrypto
+    """
+    
+    @staticmethod
+    def generate_kyber_keypair() -> Tuple[str, str]:
+        """
+        Generate ML-KEM (Kyber) key pair for key encapsulation
         
-    Note:
-        Uses liboqs-python for NIST-standard ML-KEM-1024 implementation.
-        This provides quantum-resistant key encapsulation.
-    """
-    return PQCKeyManager.generate_kyber_keypair()
-
-
-def generate_dilithium_keypair() -> Tuple[str, str]:
-    """
-    Generate ML-DSA-87 key pair for digital signatures
-    
-    Returns:
-        Tuple of (public_key, private_key) as base64 strings
+        Returns:
+            Tuple of (public_key, private_key) as base64 strings
+            
+        Note: This is a placeholder. In production, use actual Kyber implementation
+        """
+        # Simulated Kyber-1024 keys (actual implementation would use kyber-py or liboqs)
+        # Public key: ~1568 bytes, Private key: ~3168 bytes
+        public_key = secrets.token_bytes(1568)
+        private_key = secrets.token_bytes(3168)
         
-    Note:
-        Uses liboqs-python for NIST-standard ML-DSA-87 implementation.
-        This provides quantum-resistant digital signatures.
-    """
-    return PQCKeyManager.generate_dilithium_keypair()
+        return (
+            base64.b64encode(public_key).decode('utf-8'),
+            base64.b64encode(private_key).decode('utf-8')
+        )
+    
+    @staticmethod
+    def generate_dilithium_keypair() -> Tuple[str, str]:
+        """
+        Generate ML-DSA (Dilithium) key pair for digital signatures
+        
+        Returns:
+            Tuple of (public_key, private_key) as base64 strings
+            
+        Note: This is a placeholder. In production, use actual Dilithium implementation
+        """
+        # Simulated Dilithium5 keys (actual implementation would use dilithium-py or liboqs)
+        # Public key: ~2592 bytes, Private key: ~4864 bytes
+        public_key = secrets.token_bytes(2592)
+        private_key = secrets.token_bytes(4864)
+        
+        return (
+            base64.b64encode(public_key).decode('utf-8'),
+            base64.b64encode(private_key).decode('utf-8')
+        )
+    
+    @staticmethod
+    def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
+        """
+        Encapsulate a shared secret using Kyber public key
+        
+        Args:
+            public_key: Base64 encoded Kyber public key
+        
+        Returns:
+            Tuple of (ciphertext, shared_secret) as base64 strings
+        """
+        # Simulated encapsulation (actual implementation would use kyber-py)
+        ciphertext = secrets.token_bytes(1568)
+        shared_secret = secrets.token_bytes(32)
+        
+        return (
+            base64.b64encode(ciphertext).decode('utf-8'),
+            base64.b64encode(shared_secret).decode('utf-8')
+        )
+    
+    @staticmethod
+    def kyber_decapsulate(private_key: str, ciphertext: str) -> str:
+        """
+        Decapsulate shared secret using Kyber private key
+        
+        Args:
+            private_key: Base64 encoded Kyber private key
+            ciphertext: Base64 encoded ciphertext
+        
+        Returns:
+            Base64 encoded shared secret
+        """
+        # Simulated decapsulation (actual implementation would use kyber-py)
+        shared_secret = secrets.token_bytes(32)
+        return base64.b64encode(shared_secret).decode('utf-8')
+    
+    @staticmethod
+    def dilithium_sign(private_key: str, message: str) -> str:
+        """
+        Sign a message using Dilithium private key
+        
+        Args:
+            private_key: Base64 encoded Dilithium private key
+            message: Message to sign
+        
+        Returns:
+            Base64 encoded signature
+        """
+        # Simulated signing (actual implementation would use dilithium-py)
+        signature = secrets.token_bytes(4595)
+        return base64.b64encode(signature).decode('utf-8')
+    
+    @staticmethod
+    def dilithium_verify(public_key: str, message: str, signature: str) -> bool:
+        """
+        Verify a Dilithium signature
+        
+        Args:
+            public_key: Base64 encoded Dilithium public key
+            message: Original message
+            signature: Base64 encoded signature
+        
+        Returns:
+            True if signature is valid, False otherwise
+        """
+        # Simulated verification (actual implementation would use dilithium-py)
+        # In a real implementation, this would cryptographically verify
+        return True
 
 
-def kyber_encapsulate(public_key: str) -> Tuple[str, str]:
+def derive_vault_key_server_side(master_password: str, salt: str) -> str:
     """
-    Encapsulate a shared secret using ML-KEM-1024
+    Derive vault key on server side (for comparison/verification only)
+    
+    NOTE: In a true zero-knowledge system, this should NEVER be called.
+    The vault key should only be derived client-side.
+    This function exists only for demonstration and testing purposes.
     
     Args:
-        public_key: Base64 encoded ML-KEM-1024 public key
+        master_password: Master password
+        salt: Base64 encoded salt
     
     Returns:
-        Tuple of (ciphertext, shared_secret) as base64 strings
+        Base64 encoded vault key
     """
-    return PQCKeyManager.encapsulate(public_key)
-
-
-def kyber_decapsulate(ciphertext: str, private_key: str) -> str:
-    """
-    Decapsulate shared secret using ML-KEM-1024
+    salt_bytes = base64.b64decode(salt)
     
-    Args:
-        ciphertext: Base64 encoded ciphertext
-        private_key: Base64 encoded ML-KEM-1024 private key
+    # Derive 256-bit key using PBKDF2
+    vault_key = hashlib.pbkdf2_hmac(
+        'sha256',
+        master_password.encode('utf-8'),
+        salt_bytes,
+        iterations=600000,
+        dklen=32
+    )
     
-    Returns:
-        Base64 encoded shared secret
-    """
-    return PQCKeyManager.decapsulate(ciphertext, private_key)
-
-
-def dilithium_sign(message: str, private_key: str, public_key: str) -> str:
-    """
-    Sign a message using ML-DSA-87
-    
-    Args:
-        message: Message to sign
-        private_key: Base64 encoded ML-DSA-87 private key
-        public_key: Base64 encoded ML-DSA-87 public key
-    
-    Returns:
-        Base64 encoded signature
-    """
-    return PQCKeyManager.sign(message, private_key, public_key)
-
-
-def dilithium_verify(message: str, signature: str, public_key: str) -> bool:
-    """
-    Verify ML-DSA-87 digital signature
-    
-    Args:
-        message: Original message
-        signature: Base64 encoded signature
-        public_key: Base64 encoded ML-DSA-87 public key
-    
-    Returns:
-        True if signature is valid, False otherwise
-    """
-    return PQCKeyManager.verify(message, signature, public_key)
-
-
-def is_pqc_available() -> bool:
-    """
-    Check if PQC (liboqs) is available
-    
-    Returns:
-        True if liboqs is installed and functional
-    """
-    return PQCKeyManager.is_available()
-
-
-def get_pqc_info() -> dict:
-    """
-    Get information about PQC algorithms
-    
-    Returns:
-        Dictionary with algorithm information
-    """
-    return PQCKeyManager.get_algorithm_info()
-
+    return base64.b64encode(vault_key).decode('utf-8')
