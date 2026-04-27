@@ -44,7 +44,6 @@ function AddPassword({ user, vaultKey }) {
 
       // Send encrypted data to server
       const response = await passwordAPI.addPassword({
-        userId: user.userId,
         siteUrl: siteUrl,
         siteUsername: siteUsername,
         encryptedPassword: encryptedPassword,

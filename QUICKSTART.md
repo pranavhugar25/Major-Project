@@ -114,6 +114,21 @@ Tested on:
 
 ## 🔧 Troubleshooting
 
+### 401 Unauthorized Error
+If you see "401 UNAUTHORIZED" when adding passwords:
+1. **Clear browser data:**
+   - Press Ctrl+Shift+Delete
+   - Clear Cookies and Cache
+   - Refresh page and login again
+2. **Restart backend:**
+   - Stop the backend (Ctrl+C)
+   - Delete database: `rm -rf backend/instance`
+   - Run `python app.py` again
+3. **Check token storage:**
+   - Open DevTools (F12) → Console
+   - Paste: `sessionStorage.getItem('pqc_access_token')`
+   - Should show a token starting with `eyJ...`
+
 ### Backend won't start
 ```bash
 # Make sure you're in the virtual environment

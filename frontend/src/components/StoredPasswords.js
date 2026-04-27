@@ -21,8 +21,8 @@ function StoredPasswords({ user, vaultKey }) {
 
   const fetchPasswords = async () => {
     try {
-      console.log('FetchPasswords - userId:', user.userId);
-      const response = await passwordAPI.getAllPasswords(user.userId);
+      console.log('FetchPasswords - fetching all passwords');
+      const response = await passwordAPI.getAllPasswords();
       console.log('FetchPasswords - response:', response);
       
       if (response.success) {

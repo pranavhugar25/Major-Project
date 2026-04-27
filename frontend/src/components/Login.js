@@ -4,7 +4,7 @@
  * Integrates PQC (Post-Quantum Cryptography) for enhanced security
  */
 import React, { useState } from 'react';
-import { authAPI } from '../utils/api';
+import { authAPI, setAuthTokens } from '../utils/api';
 import { deriveVaultKey } from '../utils/crypto';
 import { 
   initPQC,
@@ -80,6 +80,13 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
         
         console.log('[Login] Authentication successful');
         console.log('[Login] Salt received:', response.salt ? 'present' : 'missing');
+        
+        // Store JWT tokens for API authentication
+        setAuthTokens({
+          access_token: response.access_token,
+          refresh_token: response.refresh_token,
+          expires_in: response.expires_in
+        });
         
         // Derive vault key client-side
         const vaultKey = await deriveVaultKey(masterPassword, response.salt);

@@ -8,6 +8,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import VaultLock from './components/VaultLock';
+import './utils/authDebug'; // Import auth debugging utility
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'vault-lock', 'dashboard'

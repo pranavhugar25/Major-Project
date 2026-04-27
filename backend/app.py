@@ -7,6 +7,8 @@ from flask_cors import CORS
 from models.database import db
 from routes.auth import auth_bp
 from routes.passwords import passwords_bp
+from routes.benchmark import benchmark_bp
+from routes.pqc_session import pqc_session_bp
 import os
 from datetime import timedelta
 
@@ -38,6 +40,8 @@ def create_app():
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(passwords_bp)
+    app.register_blueprint(benchmark_bp)
+    app.register_blueprint(pqc_session_bp)
     
     # Create tables
     with app.app_context():
