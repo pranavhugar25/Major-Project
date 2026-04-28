@@ -5,14 +5,16 @@
  */
 import React, { useState } from 'react';
 import { authAPI } from '../utils/api';
-import { deriveVaultKey, calculatePasswordStrength } from '../utils/crypto';
+import { calculatePasswordStrength } from '../utils/crypto';
 import { setAuthTokens } from '../utils/api';
 import { 
   initPQC,
   isPQCAvailable,
   generateKeypair, 
   encapsulate,
-  initSession
+  initSession,
+  getMLDSA,
+  verify
 } from '../utils/pqc';
 import '../styles/Auth.css';
 
@@ -90,49 +92,78 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
     setLoading(true);
 
     try {
-      // Generate PQC keypair (ML-KEM-1024) for this user
-      console.log('[Register] Generating PQC keypair...');
-      const keypair = generateKeypair();
-      console.log('[Register] PQC keypair generated');
+      // Generate PQC keypair (ML-KEM-1024) for session
+      console.log('[Register] Generating ML-KEM-1024 keypair...');
+      const clientKeypair = await generateKeypair();
+      console.log('[Register] Keypair generated');
 
-      // Register user with PQC public key
-      const response = await authAPI.register(username, masterPassword, keypair.publicKey);
+      // Register user (no PQC key sent; we use ephemeral key per session)
+      const response = await authAPI.register(username, masterPassword);
+      console.log('[Register] User registered');
 
       if (response.success) {
-        // Store JWT tokens for API authentication
+        // Store JWT tokens
         setAuthTokens({
           access_token: response.access_token,
           refresh_token: response.refresh_token,
           expires_in: response.expires_in
         });
-        
-        // Derive vault key client-side
-        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
 
-        // Initialize PQC session with server
+        // Initialize PQC session and derive vault key using ML-KEM
         try {
-          console.log('[Register] Initializing PQC session with server...');
+          setPqcStatus('connecting');
+          console.log('[Register] Initializing PQC session...');
+
+          // Get server's PQC session data
           const session = await initSession(username, response.userId);
-          
-          // Perform key encapsulation to establish shared secret
-          if (session.server_public_key) {
-            console.log('[Register] Performing key encapsulation...');
-            const encapsulation = encapsulate(session.server_public_key);
-            console.log('[Register] PQC session established successfully');
+          console.log('[Register] Session received:', session.session_id.substring(0, 16) + '...');
+
+          // Verify server ML-DSA-87 signature (optional but recommended)
+          if (session.server_signing_key && session.session_signature) {
+            console.log('[Register] Verifying server ML-DSA-87 signature...');
+            const sessionIdBytes = new TextEncoder().encode(session.session_id);
+            const signatureBytes = Uint8Array.from(atob(session.session_signature), c => c.charCodeAt(0));
+            const serverSigningKey = Uint8Array.from(atob(session.server_signing_key), c => c.charCodeAt(0));
+
+            const isValid = await verify(signatureBytes, sessionIdBytes, serverSigningKey);
+            if (isValid) {
+              console.log('[Register] ✓ Server signature verified (ML-DSA-87)');
+            } else {
+              throw new Error('ML-DSA-87 signature verification failed');
+            }
+          } else {
+            console.warn('[Register] No server signature - skipping verification');
           }
+
+          // Perform key encapsulation
+          console.log('[Register] Encapsulating shared secret...');
+          const encapsulation = encapsulate(session.server_public_key);
+          const vaultKey = encapsulation.sharedSecret;
+          console.log('[Register] ✓ Vault key derived using ML-KEM-1024');
+
+          // Send client public key to server
+          console.log('[Register] Sending client public key to server...');
+          await authAPI.confirmPQCSession(session.session_id, {
+            client_public_key: Array.from(clientKeypair.publicKey)
+          });
+
+          setPqcStatus('connected');
+          console.log('[Register] ✓ PQC session established');
+
+          onRegisterSuccess({
+            userId: response.userId,
+            username: response.username,
+            salt: response.salt
+          }, vaultKey);
+
         } catch (pqcErr) {
-          console.error('[Register] PQC session error:', pqcErr);
-          // PQC session failure is critical - log but don't block registration
-          // The user can re-establish PQC session on login
+          console.error('[Register] PQC setup failed:', pqcErr);
+          setPqcStatus('error');
+          setPqcError('PQC session failed: ' + pqcErr.message);
+          setError('Failed to establish quantum-resistant session. Please try again.');
+          setLoading(false);
         }
 
-        // Pass user data and vault key to parent
-        onRegisterSuccess({
-          userId: response.userId,
-          username: response.username,
-          salt: response.salt,
-          pqcPublicKey: keypair.publicKey
-        }, vaultKey);
       } else {
         setError(response.error || 'Registration failed');
       }

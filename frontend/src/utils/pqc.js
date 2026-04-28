@@ -5,21 +5,27 @@
 
 // Noble post-quantum global from browser build
 let nobleModule = null;
+const PQC_LOGGER_PREFIX = '[PQC-FRONTEND]';
 
 /**
  * Load noble-post-quantum from global browser build
  */
 function loadNoblePQC() {
-  if (nobleModule) return nobleModule;
+  if (nobleModule) {
+    console.log(`${PQC_LOGGER_PREFIX} PQC module already loaded`);
+    return nobleModule;
+  }
   
   // Check if the global noblePostQuantum is available
   if (typeof window !== 'undefined' && window.noblePostQuantum) {
     nobleModule = window.noblePostQuantum;
-    console.log('[PQC] noble-post-quantum loaded from browser build');
+    console.log(`${PQC_LOGGER_PREFIX} ✓ noble-post-quantum loaded from browser build`);
+    console.log(`${PQC_LOGGER_PREFIX} Module location: window.noblePostQuantum`);
     return nobleModule;
   }
   
-  console.warn('[PQC] noble-post-quantum not available');
+  console.warn(`${PQC_LOGGER_PREFIX} ✗ noble-post-quantum NOT available - window.noblePostQuantum is undefined`);
+  console.warn(`${PQC_LOGGER_PREFIX} Make sure @noble/post-quantum is installed and imported in index.html`);
   return null;
 }
 
@@ -29,8 +35,10 @@ function loadNoblePQC() {
 export function getMLKEM() {
   const pqc = loadNoblePQC();
   if (!pqc) {
+    console.error(`${PQC_LOGGER_PREFIX} getMLKEM() FAILED: PQC library not loaded`);
     throw new Error('PQC library not loaded');
   }
+  console.log(`${PQC_LOGGER_PREFIX} ML-KEM-1024 algorithm obtained`);
   return pqc.ml_kem1024;
 }
 
@@ -40,8 +48,10 @@ export function getMLKEM() {
 export function getMLDSA() {
   const pqc = loadNoblePQC();
   if (!pqc) {
+    console.error(`${PQC_LOGGER_PREFIX} getMLDSA() FAILED: PQC library not loaded`);
     throw new Error('PQC library not loaded');
   }
+  console.log(`${PQC_LOGGER_PREFIX} ML-DSA-87 algorithm obtained`);
   return pqc.ml_dsa87;
 }
 
@@ -51,15 +61,17 @@ export function getMLDSA() {
  * @returns {Object} Keypair with publicKey and secretKey
  */
 export async function generateKeypair(seed) {
+  console.log(`${PQC_LOGGER_PREFIX} generateKeypair() called`);
   const ml_kem = getMLKEM();
   try {
     const keypair = ml_kem.keygen(seed);
+    console.log(`${PQC_LOGGER_PREFIX} ✓ Keypair generated: pubKey=${keypair.publicKey.length} bytes, secKey=${keypair.secretKey.length} bytes`);
     return {
       publicKey: keypair.publicKey,
       secretKey: keypair.secretKey
     };
   } catch (error) {
-    console.error('[PQC] Key generation error:', error);
+    console.error(`${PQC_LOGGER_PREFIX} ✗ Key generation error:`, error);
     throw error;
   }
 }
@@ -70,15 +82,17 @@ export async function generateKeypair(seed) {
  * @returns {Object} Ciphertext and shared secret
  */
 export async function encapsulate(publicKey) {
+  console.log(`${PQC_LOGGER_PREFIX} encapsulate() called with publicKey length=${publicKey?.length}`);
   const ml_kem = getMLKEM();
   try {
     const result = ml_kem.encapsulate(publicKey);
+    console.log(`${PQC_LOGGER_PREFIX} ✓ Encapsulation successful: ct=${result.cipherText.length} bytes, ss=${result.sharedSecret.length} bytes`);
     return {
       cipherText: result.cipherText,
       sharedSecret: result.sharedSecret
     };
   } catch (error) {
-    console.error('[PQC] Encapsulation error:', error);
+    console.error(`${PQC_LOGGER_PREFIX} ✗ Encapsulation error:`, error);
     throw error;
   }
 }
@@ -90,11 +104,14 @@ export async function encapsulate(publicKey) {
  * @returns {Uint8Array} Shared secret
  */
 export async function decapsulate(cipherText, secretKey) {
+  console.log(`${PQC_LOGGER_PREFIX} decapsulate() called`);
   const ml_kem = getMLKEM();
   try {
-    return ml_kem.decapsulate(cipherText, secretKey);
+    const result = ml_kem.decapsulate(cipherText, secretKey);
+    console.log(`${PQC_LOGGER_PREFIX} ✓ Decapsulation successful: secret=${result.length} bytes`);
+    return result;
   } catch (error) {
-    console.error('[PQC] Decapsulation error:', error);
+    console.error(`${PQC_LOGGER_PREFIX} ✗ Decapsulation error:`, error);
     throw error;
   }
 }
@@ -106,11 +123,14 @@ export async function decapsulate(cipherText, secretKey) {
  * @returns {Uint8Array} Signature
  */
 export async function sign(message, secretKey) {
+  console.log(`${PQC_LOGGER_PREFIX} sign() called`);
   const ml_dsa = getMLDSA();
   try {
-    return ml_dsa.sign(message, secretKey);
+    const signature = ml_dsa.sign(message, secretKey);
+    console.log(`${PQC_LOGGER_PREFIX} ✓ Signature generated: ${signature.length} bytes`);
+    return signature;
   } catch (error) {
-    console.error('[PQC] Signing error:', error);
+    console.error(`${PQC_LOGGER_PREFIX} ✗ Signing error:`, error);
     throw error;
   }
 }
@@ -123,11 +143,14 @@ export async function sign(message, secretKey) {
  * @returns {boolean} True if signature is valid
  */
 export async function verify(signature, message, publicKey) {
+  console.log(`${PQC_LOGGER_PREFIX} verify() called`);
   const ml_dsa = getMLDSA();
   try {
-    return ml_dsa.verify(signature, message, publicKey);
+    const result = ml_dsa.verify(signature, message, publicKey);
+    console.log(`${PQC_LOGGER_PREFIX} Verification result: ${result ? 'VALID' : 'INVALID'}`);
+    return result;
   } catch (error) {
-    console.error('[PQC] Verification error:', error);
+    console.error(`${PQC_LOGGER_PREFIX} ✗ Verification error:`, error);
     throw error;
   }
 }
@@ -146,7 +169,12 @@ export function getRandomBytes(length) {
  * @returns {boolean} True if PQC is available
  */
 export function isPQCAvailable() {
-  return typeof window !== 'undefined' && !!window.noblePostQuantum;
+  const available = typeof window !== 'undefined' && !!window.noblePostQuantum;
+  console.log(`${PQC_LOGGER_PREFIX} isPQCAvailable(): ${available ? 'YES' : 'NO'}`);
+  if (!available) {
+    console.warn(`${PQC_LOGGER_PREFIX} window.noblePostQuantum =`, typeof window !== 'undefined' ? window.noblePostQuantum : 'window undefined');
+  }
+  return available;
 }
 
 /**
@@ -154,24 +182,34 @@ export function isPQCAvailable() {
  * @returns {Object} Status object with availability info
  */
 export async function initPQC() {
+  console.log(`${PQC_LOGGER_PREFIX} initPQC() called`);
   const available = isPQCAvailable();
   
   if (available) {
-    const ml_kem = getMLKEM();
-    const ml_dsa = getMLDSA();
-    
-    console.log('[PQC] Initialization successful');
-    console.log('[PQC] Using ML-KEM-1024 (NIST Level 5)');
-    console.log('[PQC] Using ML-DSA-87 (NIST Level 5)');
-    
-    return {
-      available: true,
-      ml_kem: 'ML-KEM-1024',
-      ml_dsa: 'ML-DSA-87',
-      securityLevel: 'NIST Level 5'
-    };
+    try {
+      const ml_kem = getMLKEM();
+      const ml_dsa = getMLDSA();
+      
+      console.log(`${PQC_LOGGER_PREFIX} ✓ Initialization successful`);
+      console.log(`${PQC_LOGGER_PREFIX} ✓ Using ML-KEM-1024 (NIST Level 5)`);
+      console.log(`${PQC_LOGGER_PREFIX} ✓ Using ML-DSA-87 (NIST Level 5)`);
+      
+      return {
+        available: true,
+        ml_kem: 'ML-KEM-1024',
+        ml_dsa: 'ML-DSA-87',
+        securityLevel: 'NIST Level 5'
+      };
+    } catch (error) {
+      console.error(`${PQC_LOGGER_PREFIX} ✗ Initialization failed:`, error);
+      return {
+        available: false,
+        error: error.message
+      };
+    }
   }
   
+  console.warn(`${PQC_LOGGER_PREFIX} ✗ PQC not available - noble-post-quantum library not loaded`);
   return {
     available: false,
     error: 'noble-post-quantum not loaded'
@@ -180,69 +218,29 @@ export async function initPQC() {
 
 /**
  * Initialize PQC session with the server
- * Uses ML-KEM-1024 for key exchange with the server
  * @param {string} username - User's username
  * @param {string} userId - User's ID
- * @returns {Object} Session object
+ * @returns {Promise<object>} Session data including server public key and signature
  */
 export async function initSession(username, userId) {
-  const pqc = loadNoblePQC();
-  if (!pqc) {
-    throw new Error('PQC library not loaded');
-  }
-  
-  try {
-    // Generate ML-KEM-1024 keypair client-side
-    const keypair = await generateKeypair();
-    
-    // Import the API
-    const { pqcAPI } = await import('../utils/api');
-    
-    // Send public key to server to initialize session
-    const response = await pqcAPI.initSession({
-      userId,
-      publicKey: Array.from(keypair.publicKey)
-    });
-    
-    // Decode the server's base64 public key (handle both standard and URL-safe base64)
-    // Backend returns server_public_key (snake_case)
-    let base64Key = response.server_public_key;
-    // Replace URL-safe characters with standard base64 characters
-    base64Key = base64Key.replace(/-/g, '+').replace(/_/g, '/');
-    // Add padding if needed
-    while (base64Key.length % 4 !== 0) {
-      base64Key += '=';
-    }
-    const serverPublicKeyBytes = atob(base64Key);
-    const serverPublicKey = new Uint8Array(serverPublicKeyBytes.length);
-    for (let i = 0; i < serverPublicKeyBytes.length; i++) {
-      serverPublicKey[i] = serverPublicKeyBytes.charCodeAt(i);
-    }
-    
-    // Encapsulate to get shared secret
-    const sharedSecret = await encapsulate(serverPublicKey);
-    
-    // Store session info
-    const session = {
-      session_id: response.sessionId,
-      userId,
-      publicKey: keypair.publicKey,
-      secretKey: keypair.secretKey,
-      sharedSecret: sharedSecret.sharedSecret
-    };
-    
-    // Store in sessionStorage
-    sessionStorage.setItem('pqc_session', JSON.stringify({
-      sessionId: session.session_id,
-      publicKey: Array.from(session.publicKey)
-    }));
-    
-    console.log('[PQC] Session initialized successfully with ML-KEM-1024');
-    return session;
-  } catch (error) {
-    console.error('[PQC] Session initialization error:', error);
-    throw error;
-  }
+  console.log(`${PQC_LOGGER_PREFIX} initSession() called for user ${username}`);
+  const { pqcAPI } = await import('../utils/api');
+  const response = await pqcAPI.initSession(username, userId);
+  console.log(`${PQC_LOGGER_PREFIX} Session init response received`);
+  return response;
+}
+
+/**
+ * Confirm PQC session with client public key
+ * @param {string} sessionId - Session ID
+ * @param {object} clientKeyData - Client public key data
+ * @returns {Promise<object>} Confirmation response
+ */
+export async function confirmPQCSession(sessionId, clientKeyData) {
+  console.log(`${PQC_LOGGER_PREFIX} confirmPQCSession() called`);
+  const { pqcAPI } = await import('../utils/api');
+  const response = await pqcAPI.confirmPQCSession(sessionId, clientKeyData);
+  return response;
 }
 
 /**

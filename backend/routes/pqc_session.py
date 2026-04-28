@@ -14,12 +14,16 @@ Endpoints:
 import os
 import secrets
 import logging
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any
 from flask import Blueprint, request, jsonify, current_app
 
 # Import PQC utilities
-from utils.pqc import PQCKeyManager, PQCError
+from utils.pqc import (
+    PQCKeyManager, PQCError,
+    sign_session_data, get_server_mldsa_public_key
+)
 from utils.auth import require_auth
 
 # Configure logging
@@ -253,7 +257,9 @@ def init_session():
         user_id (optional): User ID if already authenticated
     
     Returns:
-        JSON with session_id, server_public_key, expires_at
+        JSON with session_id, server_public_key, expires_at,
+        server_signing_key (ML-DSA-87 public key),
+        session_signature (ML-DSA-87 signature of session_id)
     """
     try:
         # Parse request body
@@ -267,11 +273,21 @@ def init_session():
             username=username
         )
         
+        # Sign the session ID with server's ML-DSA-87 private key
+        logger.info(f"[PQC_SESSION] Signing session {session.session_id[:16]}... with ML-DSA-87")
+        session_signature = sign_session_data(session.session_id)
+        server_signing_key = get_server_mldsa_public_key()
+        
+        logger.info(f"[PQC_SESSION] ✓ Session created: id={session.session_id[:32]}...")
+        logger.info(f"[PQC_SESSION] ✓ Session signed with ML-DSA-87")
+        
         return jsonify({
             'success': True,
             'session_id': session.session_id,
             'server_public_key': session.public_key,
             'algorithm': 'ML-KEM-1024',
+            'server_signing_key': server_signing_key,
+            'session_signature': session_signature,
             'expires_at': session.expires_at.isoformat(),
             'idle_timeout_minutes': get_idle_timeout_minutes()
         }), 200
@@ -284,6 +300,63 @@ def init_session():
         }), 500
     except Exception as e:
         logger.error(f"Error initializing PQC session: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error'
+        }), 500
+
+
+@pqc_session_bp.route('/confirm', methods=['POST'])
+def confirm_session():
+    """Receive client ML-KEM-1024 public key to finalize PQC session"""
+    logger.info("[PQC_SESSION] /confirm endpoint called")
+    data = request.get_json() or {}
+    session_id = data.get('session_id')
+    client_pub_key = data.get('client_public_key')  # Expected as JSON array of ints
+
+    if not session_id or not client_pub_key:
+        logger.error("[PQC_SESSION] Missing session_id or client_public_key")
+        return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+
+    session = pqc_sessions.get(session_id)
+    if not session:
+        logger.warning(f"[PQC_SESSION] Session not found: {session_id}")
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    # Convert client public key array to base64 string for storage
+    if isinstance(client_pub_key, list):
+        # Convert list of ints to bytes then to base64
+        client_pub_bytes = bytes(client_pub_key)
+        client_pub_key_b64 = base64.b64encode(client_pub_bytes).decode('utf-8')
+    else:
+        # Already base64 string
+        client_pub_key_b64 = client_pub_key
+
+    session.client_public_key = client_pub_key_b64
+    logger.info(f"[PQC_SESSION] Client public key stored for session {session_id[:8]}...")
+    return jsonify({'success': True, 'message': 'Client public key accepted'}), 200
+
+
+@pqc_session_bp.route('/server-signing-key', methods=['GET'])
+def get_server_signing_key():
+    """Get server's ML-DSA-87 public key for signature verification"""
+    logger.info("[PQC_SESSION] /server-signing-key endpoint called")
+    try:
+        public_key = get_server_mldsa_public_key()
+        if not public_key:
+            return jsonify({
+                'success': False,
+                'error': 'Server signing key not initialized'
+            }), 500
+        
+        logger.info("[PQC_SESSION] ✓ Returning server ML-DSA-87 public key")
+        return jsonify({
+            'success': True,
+            'algorithm': 'ML-DSA-87',
+            'public_key': public_key
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting server signing key: {e}")
         return jsonify({
             'success': False,
             'error': 'Internal server error'

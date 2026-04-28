@@ -9,12 +9,16 @@ each other using a shared password without exposing the password
 or enabling offline dictionary attacks.
 """
 
+import logging
 import spake2
 from spake2 import SPAKE2_A, SPAKE2_B
 import hashlib
 import base64
 import secrets
 from typing import Tuple, Optional
+
+logger = logging.getLogger(__name__)
+logger.info("[SPAKE2] Module loaded, SPAKE2 classes available")
 
 
 class SPAKE2Server:
@@ -36,6 +40,7 @@ class SPAKE2Server:
         self.spake2 = SPAKE2_B(self.password)
         self._key_established = False
         self._shared_key = None
+        logger.debug("[SPAKE2] SPAKE2Server initialized")
         
     def generate_initial_message(self) -> str:
         """
@@ -47,6 +52,7 @@ class SPAKE2Server:
             Base64 encoded first message
         """
         msg = self.spake2.start()
+        logger.debug("[SPAKE2] Server: generated initial message")
         return base64.b64encode(msg).decode('utf-8')
     
     def process_client_response(self, client_message: str) -> str:
@@ -59,9 +65,11 @@ class SPAKE2Server:
         Returns:
             Base64 encoded server's final message
         """
+        logger.debug("[SPAKE2] Server: processing client response")
         client_msg_bytes = base64.b64decode(client_message)
         self._shared_key = self.spake2.finish(client_msg_bytes)
         self._key_established = True
+        logger.info(f"[SPAKE2] ✓ Server: key exchange complete, shared key length={len(self._shared_key)}")
         # Return empty since finish() doesn't return a message
         return ""
     
@@ -76,10 +84,13 @@ class SPAKE2Server:
             True if confirmation matches, False otherwise
         """
         if not self._key_established:
+            logger.warning("[SPAKE2] Server: key confirmation failed - key not established")
             return False
             
         expected_confirmation = self.get_key_confirmation()
-        return secrets.compare_digest(expected_confirmation, confirmation)
+        result = secrets.compare_digest(expected_confirmation, confirmation)
+        logger.debug(f"[SPAKE2] Server: key confirmation {'MATCHED' if result else 'FAILED'}")
+        return result
     
     def get_key_confirmation(self) -> str:
         """
@@ -130,6 +141,7 @@ class SPAKE2Client:
         self.spake2 = SPAKE2_A(self.password)
         self._key_established = False
         self._shared_key = None
+        logger.debug("[SPAKE2] SPAKE2Client initialized")
         
     def generate_initial_message(self) -> str:
         """
@@ -139,6 +151,7 @@ class SPAKE2Client:
             Base64 encoded first message
         """
         msg = self.spake2.start()
+        logger.debug("[SPAKE2] Client: generated initial message")
         return base64.b64encode(msg).decode('utf-8')
     
     def process_server_response(self, server_message: str) -> str:
@@ -151,9 +164,11 @@ class SPAKE2Client:
         Returns:
             Base64 encoded client's final message and confirmation
         """
+        logger.debug("[SPAKE2] Client: processing server response")
         # For SPAKE2_A, finish() computes the shared key
         self._shared_key = self.spake2.finish(b'')  # Server sends empty message
         self._key_established = True
+        logger.info(f"[SPAKE2] ✓ Client: key exchange complete, shared key length={len(self._shared_key)}")
         return ""
     
     def generate_key_confirmation(self) -> str:
@@ -164,9 +179,11 @@ class SPAKE2Client:
             Base64 encoded key confirmation
         """
         if not self._key_established:
+            logger.warning("[SPAKE2] Client: key confirmation failed - key not established")
             return ""
             
         confirmation = hashlib.sha256(self._shared_key + b"confirmation").digest()
+        logger.debug("[SPAKE2] Client: generated key confirmation")
         return base64.b64encode(confirmation).decode('utf-8')
     
     def verify_server_confirmation(self, confirmation: str) -> bool:
@@ -180,10 +197,13 @@ class SPAKE2Client:
             True if confirmation matches, False otherwise
         """
         if not self._key_established:
+            logger.warning("[SPAKE2] Client: server confirmation verification failed - key not established")
             return False
             
         expected_confirmation = hashlib.sha256(self._shared_key + b"confirmation").digest()
-        return secrets.compare_digest(expected_confirmation, base64.b64decode(confirmation))
+        result = secrets.compare_digest(expected_confirmation, base64.b64decode(confirmation))
+        logger.debug(f"[SPAKE2] Client: server confirmation {'MATCHED' if result else 'FAILED'}")
+        return result
     
     def get_shared_key(self) -> Optional[bytes]:
         """
@@ -221,6 +241,7 @@ def generate_password_verifier(password: str) -> Tuple[str, str]:
     Returns:
         Tuple of (verifier, salt) - both base64 encoded
     """
+    logger.debug("[SPAKE2] Generating password verifier")
     # Generate a random salt
     salt = secrets.token_bytes(32)
     
@@ -229,6 +250,7 @@ def generate_password_verifier(password: str) -> Tuple[str, str]:
     verifier_input = password.encode('utf-8') + salt
     verifier = hashlib.sha256(verifier_input).digest()
     
+    logger.info(f"[SPAKE2] ✓ Verifier generated: salt_len={len(salt)}, verifier_len={len(verifier)}")
     return base64.b64encode(verifier).decode('utf-8'), base64.b64encode(salt).decode('utf-8')
 
 
@@ -243,15 +265,12 @@ def compute_verifier(password: str, salt: str) -> str:
     Returns:
         Base64 encoded verifier
     """
+    logger.debug("[SPAKE2] Computing verifier for password check")
     salt_bytes = base64.b64decode(salt)
     verifier_input = password.encode('utf-8') + salt_bytes
     verifier = hashlib.sha256(verifier_input).digest()
     return base64.b64encode(verifier).decode('utf-8')
 
-
-# ============================================================================
-# Simplified SPAKE2 for single-message authentication
-# ============================================================================
 
 def create_server(password: str) -> SPAKE2Server:
     """
@@ -263,6 +282,7 @@ def create_server(password: str) -> SPAKE2Server:
     Returns:
         SPAKE2Server instance
     """
+    logger.debug("[SPAKE2] Creating SPAKE2 server")
     return SPAKE2Server(password)
 
 
@@ -276,4 +296,5 @@ def create_client(password: str) -> SPAKE2Client:
     Returns:
         SPAKE2Client instance
     """
+    logger.debug("[SPAKE2] Creating SPAKE2 client")
     return SPAKE2Client(password)

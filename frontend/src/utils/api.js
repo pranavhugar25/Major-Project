@@ -341,14 +341,26 @@ export const pqcAPI = {
    * Initialize PQC session with server
    * @param {string} username - Username
    * @param {string} userId - User ID
-   * @param {string} publicKey - PQC public key (ML-KEM-1024)
-   * @returns {Promise<object>} Session data
+   * @returns {Promise<object>} Session data with server public key
    */
-  initSession: async (username, userId, publicKey) => {
+  initSession: async (username, userId) => {
     const response = await api.post('/auth/pqc/init', {
       username,
-      userId,
-      publicKey
+      userId
+    });
+    return response.data;
+  },
+
+  /**
+   * Confirm PQC session with client's public key
+   * @param {string} sessionId - Session ID
+   * @param {object} clientKeyData - Client's public key data
+   * @returns {Promise<object>} Confirmation response
+   */
+  confirmPQCSession: async (sessionId, clientKeyData) => {
+    const response = await api.post('/auth/pqc/confirm', {
+      session_id: sessionId,
+      client_public_key: clientKeyData.client_public_key
     });
     return response.data;
   },

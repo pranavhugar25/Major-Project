@@ -5,13 +5,14 @@
  */
 import React, { useState } from 'react';
 import { authAPI, setAuthTokens } from '../utils/api';
-import { deriveVaultKey } from '../utils/crypto';
 import { 
   initPQC,
   isPQCAvailable,
   generateKeypair,
   encapsulate,
-  initSession
+  initSession,
+  getMLDSA,
+  verify
 } from '../utils/pqc';
 import '../styles/Auth.css';
 
@@ -72,57 +73,95 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
     }
 
     try {
-      // Login to get salt
+      // Login to get user data (salt, userId)
       const response = await authAPI.login(username, masterPassword);
 
       if (response.success) {
         setFailedAttempts(0);
-        
+
         console.log('[Login] Authentication successful');
         console.log('[Login] Salt received:', response.salt ? 'present' : 'missing');
-        
+
         // Store JWT tokens for API authentication
         setAuthTokens({
           access_token: response.access_token,
           refresh_token: response.refresh_token,
           expires_in: response.expires_in
         });
-        
-        // Derive vault key client-side
-        const vaultKey = await deriveVaultKey(masterPassword, response.salt);
-        console.log('[Login] VaultKey derived:', vaultKey ? 'present' : 'missing');
 
-        // Initialize PQC session with server
+        // Initialize PQC session with server - REQUIRED for vault key
         try {
           setPqcStatus('connecting');
           console.log('[Login] Initializing PQC session with server...');
-          
+
+          // Step 1: Get server's ML-KEM-1024 public key and ML-DSA-87 signature
           const session = await initSession(username, response.userId);
-          console.log('[Login] Session initialized:', session.session_id);
-          
-          // Perform key encapsulation to establish shared secret
-          if (session.server_public_key) {
-            console.log('[Login] Performing key encapsulation...');
-            const encapsulation = encapsulate(session.server_public_key);
-            console.log('[Login] PQC key exchange complete');
+          console.log('[Login] PQC session initialized:', session.session_id);
+
+          // Step 1b: Verify server's ML-DSA-87 signature on session_id
+          if (session.server_signing_key && session.session_signature) {
+            console.log('[Login] Verifying server ML-DSA-87 signature...');
+            const ml_dsa = getMLDSA();
+            
+            // Decode base64 signature and session_id
+            const sessionIdBytes = new TextEncoder().encode(session.session_id);
+            const signatureBytes = Uint8Array.from(atob(session.session_signature), c => c.charCodeAt(0));
+            const serverSigningKey = Uint8Array.from(atob(session.server_signing_key), c => c.charCodeAt(0));
+            
+            const isValid = await ml_dsa.verify(
+              signatureBytes,
+              sessionIdBytes,
+              serverSigningKey
+            );
+            
+            if (isValid) {
+              console.log('[Login] ✓ ML-DSA-87 signature VERIFIED - server authenticated');
+            } else {
+              throw new Error('ML-DSA-87 signature verification failed - possible MITM attack');
+            }
+          } else {
+            console.warn('[Login] ⚠️ Server signature not provided - skipping ML-DSA verification (should be enabled in production)');
           }
-          
+
+          // Step 2: Client generates ML-KEM-1024 keypair
+          console.log('[Login] Generating ML-KEM-1024 keypair...');
+          const clientKeypair = await generateKeypair();
+
+          // Step 3: Encapsulate shared secret using SERVER's public key
+          console.log('[Login] Encapsulating shared secret with server public key...');
+          const encapsulation = await encapsulate(session.server_public_key);
+
+          // Step 4: The shared secret IS the vault key (PQC-derived)
+          const vaultKey = encapsulation.sharedSecret;
+          console.log('[Login] ✓ Vault key derived from ML-KEM-1024 shared secret');
+          console.log('[Login] Vault key (first 40 chars):', vaultKey.substring(0, 40) + '...');
+
+          // Step 5: Send client's public key to server for confirmation
+          console.log('[Login] Sending client public key to server...');
+          await authAPI.confirmPQCSession(session.session_id, {
+            client_public_key: Array.from(clientKeypair.publicKey)
+          });
+
           setPqcStatus('connected');
-          console.log('[Login] PQC session fully established');
+          console.log('[Login] ✓ PQC session fully established - vault key ready');
+
+          // Pass user data and PQC-derived vault key to parent
+          onLoginSuccess({
+            userId: response.userId,
+            username: response.username,
+            salt: response.salt
+          }, vaultKey);
+
         } catch (pqcErr) {
           console.error('[Login] PQC session error:', pqcErr);
-          // PQC failure is logged but we continue - user is authenticated
-          // In production, you might want to be stricter here
+          // PQC failure is critical - without it, vault key cannot be established
           setPqcStatus('error');
           setPqcError(pqcErr.message || 'Failed to establish PQC session');
+          setError('Failed to establish quantum-resistant session. Please try again.');
+          setLoading(false);
+          return;
         }
 
-        // Pass user data and vault key to parent
-        onLoginSuccess({
-          userId: response.userId,
-          username: response.username,
-          salt: response.salt
-        }, vaultKey);
       } else {
         setFailedAttempts(prev => prev + 1);
         setError('Invalid username or password');

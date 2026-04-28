@@ -11,21 +11,54 @@ NIST PQC: https://csrc.nist.gov/projects/post-quantum-cryptography
 """
 import base64
 import logging
+import os
 from typing import Tuple, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 # Try to import oqs (liboqs-python), provide helpful error if not available
+LIBOQS_AVAILABLE = False
+logger.info("[PQC] Attempting to import liboqs Python bindings...")
+
 try:
+    import oqs
+    logger.info(f"[PQC] Imported 'oqs' module from: {oqs.__file__}")
     from oqs import KeyEncapsulation, Signature
     LIBOQS_AVAILABLE = True
-except ImportError:
+    logger.info("[PQC] ✓ liboqs Python bindings loaded successfully")
+    
+    # Query enabled mechanisms
+    try:
+        enabled_kems = oqs.get_enabled_kem_mechanisms()
+        enabled_sigs = oqs.get_enabled_sig_mechanisms()
+        logger.info(f"[PQC] Enabled KEMs: {enabled_kems}")
+        logger.info(f"[PQC] Enabled Signatures: {enabled_sigs}")
+        if 'ML-KEM-1024' in enabled_kems:
+            logger.info("[PQC] ✓ ML-KEM-1024 is ENABLED")
+        else:
+            logger.warning("[PQC] ✗ ML-KEM-1024 is NOT enabled in liboqs build")
+        if 'ML-DSA-87' in enabled_sigs:
+            logger.info("[PQC] ✓ ML-DSA-87 is ENABLED")
+        else:
+            logger.warning("[PQC] ✗ ML-DSA-87 is NOT enabled in liboqs build")
+    except AttributeError as e:
+        logger.warning(f"[PQC] Could not query mechanisms via module API: {e}")
+    
+    # Note: Operational self-test is performed at module load time via _run_self_test()
+    
+except ImportError as e:
     LIBOQS_AVAILABLE = False
-    logger.warning(
-        "liboqs not installed. PQC features will be disabled. "
-        "Install with: pip install liboqs-python"
+    logger.error(
+        f"[PQC] ✗ Failed to import liboqs Python bindings: {e}. "
+        "PQC features will be DISABLED."
     )
+    logger.error(f"[PQC] LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'NOT SET')}")
+    import traceback
+    logger.error(f"[PQC] Import traceback: {traceback.format_exc()}")
+    logger.error(f"[PQC] Current LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'NOT SET')}")
+    import traceback
+    logger.error(f"[PQC] Import traceback: {traceback.format_exc()}")
 
 
 @dataclass
@@ -40,6 +73,41 @@ class KEMResult:
     """Result of key encapsulation"""
     ciphertext: str
     shared_secret: str
+
+
+# In-memory server signing keypair (generated at startup)
+_server_mldsa_public_key: str = None
+_server_mldsa_private_key: str = None
+
+def init_server_signing_keypair():
+    """Generate server's ML-DSA-87 keypair for signing session data"""
+    global _server_mldsa_public_key, _server_mldsa_private_key
+    if not LIBOQS_AVAILABLE:
+        logger.warning("[PQC] Cannot generate signing keypair - liboqs not available")
+        return
+    
+    try:
+        keypair = MLDSA87.generate_keypair()
+        _server_mldsa_public_key = keypair.public_key
+        _server_mldsa_private_key = keypair.private_key
+        logger.info(f"[PQC] ✓ Server ML-DSA-87 signing keypair generated")
+        logger.info(f"[PQC]   Public key length: {len(_server_mldsa_public_key)} chars")
+    except Exception as e:
+        logger.error(f"[PQC] Failed to generate server signing keypair: {e}")
+
+def get_server_mldsa_public_key() -> str:
+    """Get server's ML-DSA public key for signature verification"""
+    return _server_mldsa_public_key
+
+def sign_session_data(data: str) -> str:
+    """Sign data using server's ML-DSA-87 private key"""
+    if not _server_mldsa_private_key:
+        raise PQCError("Server signing key not initialized")
+    return MLDSA87.sign(data, _server_mldsa_private_key, _server_mldsa_public_key)
+
+def verify_session_signature(data: str, signature: str, public_key: str) -> bool:
+    """Verify ML-DSA-87 signature"""
+    return MLDSA87.verify(data, signature, public_key)
 
 
 @dataclass
@@ -90,20 +158,20 @@ class MLKEM1024:
     def generate_keypair() -> PQCKeyPair:
         """
         Generate ML-KEM-1024 key pair
-        
+
         Returns:
             PQCKeyPair with base64-encoded public and private keys
-            
+
         Raises:
             PQCUnavailableError: If liboqs is not installed
         """
         _check_liboqs()
-        
+
         try:
             with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
-                public_key = kem.generate_keypair()
-                secret_key = kem.export_secret_key()
-                
+                public_key = kem.generate_keypair()  # Returns bytes (public key)
+                secret_key = kem.export_secret_key()  # Export private key
+
                 return PQCKeyPair(
                     public_key=base64.b64encode(public_key).decode('utf-8'),
                     private_key=base64.b64encode(secret_key).decode('utf-8')
@@ -111,30 +179,30 @@ class MLKEM1024:
         except Exception as e:
             logger.error(f"ML-KEM-1024 key generation failed: {e}")
             raise PQCError(f"Key generation failed: {e}")
-    
+
     @staticmethod
     def encapsulate(public_key_b64: str) -> KEMResult:
         """
         Encapsulate a shared secret using ML-KEM-1024
-        
+
         Args:
             public_key_b64: Base64-encoded public key
-            
+
         Returns:
             KEMResult with ciphertext and shared_secret (both base64-encoded)
-            
+
         Raises:
             PQCUnavailableError: If liboqs is not installed
             PQCError: If encapsulation fails
         """
         _check_liboqs()
-        
+
         try:
             public_key = base64.b64decode(public_key_b64)
-            
+
             with KeyEncapsulation(MLKEM1024.ALGORITHM) as kem:
                 ciphertext, shared_secret = kem.encap_secret(public_key)
-                
+
                 return KEMResult(
                     ciphertext=base64.b64encode(ciphertext).decode('utf-8'),
                     shared_secret=base64.b64encode(shared_secret).decode('utf-8')
@@ -142,29 +210,30 @@ class MLKEM1024:
         except Exception as e:
             logger.error(f"ML-KEM-1024 encapsulation failed: {e}")
             raise PQCError(f"Encapsulation failed: {e}")
-    
+
     @staticmethod
     def decapsulate(ciphertext_b64: str, private_key_b64: str) -> str:
         """
         Decapsulate shared secret using ML-KEM-1024
-        
+
         Args:
             ciphertext_b64: Base64-encoded ciphertext
             private_key_b64: Base64-encoded private key
-            
+
         Returns:
             Base64-encoded shared secret
-            
+
         Raises:
             PQCUnavailableError: If liboqs is not installed
             PQCError: If decapsulation fails
         """
         _check_liboqs()
-        
+
         try:
             ciphertext = base64.b64decode(ciphertext_b64)
             private_key = base64.b64decode(private_key_b64)
-            
+
+            # liboqs: Create KEM instance with private key for decapsulation
             with KeyEncapsulation(MLKEM1024.ALGORITHM, private_key) as kem:
                 shared_secret = kem.decap_secret(ciphertext)
                 return base64.b64encode(shared_secret).decode('utf-8')
@@ -294,10 +363,6 @@ class PQCKeyManager:
         
         Returns:
             Tuple of (public_key, private_key) as base64 strings
-            
-        Note:
-            This is the primary method for establishing quantum-resistant
-            session keys between client and server.
         """
         keypair = MLKEM1024.generate_keypair()
         return (keypair.public_key, keypair.private_key)
@@ -309,39 +374,33 @@ class PQCKeyManager:
         
         Returns:
             Tuple of (public_key, private_key) as base64 strings
-            
-        Note:
-            This is used for server authentication and message signing.
         """
         keypair = MLDSA87.generate_keypair()
         return (keypair.public_key, keypair.private_key)
     
     @staticmethod
-    def encapsulate(public_key_b64: str) -> Tuple[str, str]:
+    def encapsulate(public_key_b64: str) -> KEMResult:
         """
         Encapsulate shared secret using ML-KEM-1024
-        
+
         Args:
             public_key_b64: Base64-encoded Kyber public key
-            
+
         Returns:
-            Tuple of (ciphertext, shared_secret) as base64 strings
-            
-        Note:
-            The shared secret can be used for symmetric encryption.
+            KEMResult with ciphertext and shared_secret (both base64-encoded)
         """
         result = MLKEM1024.encapsulate(public_key_b64)
-        return (result.ciphertext, result.shared_secret)
-    
+        return result
+
     @staticmethod
     def decapsulate(ciphertext_b64: str, private_key_b64: str) -> str:
         """
         Decapsulate shared secret using ML-KEM-1024
-        
+
         Args:
             ciphertext_b64: Base64-encoded ciphertext
             private_key_b64: Base64-encoded private key
-            
+
         Returns:
             Base64-encoded shared secret
         """
@@ -380,10 +439,10 @@ class PQCKeyManager:
     @staticmethod
     def is_available() -> bool:
         """
-        Check if liboqs is available
+        Check if liboqs is available and functional
         
         Returns:
-            True if liboqs is installed and functional
+            True if liboqs is installed and working
         """
         return LIBOQS_AVAILABLE
     
@@ -402,3 +461,48 @@ class PQCKeyManager:
             "nist_level": 5,
             "description": "NIST Level 5 post-quantum cryptography"
         }
+
+
+# ============================================================================
+# Runtime self-test (runs on module import)
+# ============================================================================
+
+def _run_self_test():
+    """Run a quick self-test to verify PQC operations work"""
+    if not LIBOQS_AVAILABLE:
+        logger.warning("[PQC] Self-test SKIPPED: liboqs not available")
+        return False
+
+    logger.info("[PQC] Running self-test to verify operations...")
+    try:
+        # Test 1: Key generation via our wrapper
+        keypair = MLKEM1024.generate_keypair()
+        logger.info(f"[PQC] ✓ Key generation: pub={len(keypair.public_key)} chars, priv={len(keypair.private_key)} chars")
+
+        # Test 2: Encapsulation
+        result = MLKEM1024.encapsulate(keypair.public_key)
+        logger.info(f"[PQC] ✓ Encapsulation: ct={len(result.ciphertext)} chars, ss={len(result.shared_secret)} chars")
+
+        # Test 3: Decapsulation
+        recovered_ss_b64 = MLKEM1024.decapsulate(result.ciphertext, keypair.private_key)
+        logger.info(f"[PQC] ✓ Decapsulation: recovered secret length={len(recovered_ss_b64)}")
+
+        # Test 4: Verify shared secrets match
+        if result.shared_secret == recovered_ss_b64:
+            logger.info("[PQC] ✓✓✓ Self-test PASSED: Shared secrets match")
+            return True
+        else:
+            logger.error("[PQC] ✗ Self-test FAILED: Shared secrets do NOT match")
+            logger.error(f"[PQC] Expected: {result.shared_secret[:50]}...")
+            logger.error(f"[PQC] Got: {recovered_ss_b64[:50]}...")
+            return False
+
+    except Exception as e:
+        logger.error(f"[PQC] ✗ Self-test FAILED with exception: {e}")
+        import traceback
+        logger.error(f"[PQC] Traceback: {traceback.format_exc()}")
+        return False
+
+
+# Run self-test at module load time (only if LIBOQS_AVAILABLE)
+_SELF_TEST_RESULT = _run_self_test() if LIBOQS_AVAILABLE else False

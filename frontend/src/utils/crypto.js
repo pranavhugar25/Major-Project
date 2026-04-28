@@ -5,7 +5,8 @@
  * Implements AES-256-GCM authenticated encryption using Web Crypto API
  * for maximum security with proper integrity verification.
  */
-import CryptoJS from 'crypto-js';
+
+const CRYPTO_LOGGER_PREFIX = '[CRYPTO-CLASSICAL]';
 
 /**
  * Securely clear sensitive data from memory
@@ -21,11 +22,11 @@ const secureZeroize = (data) => {
 
 /**
  * Generate a cryptographically secure random key
- * 
  * @param {number} length - Key length in bytes (default 32)
  * @returns {Promise<string>} Base64 encoded key
  */
 export const generateRandomKey = async (length = 32) => {
+  console.log(`${CRYPTO_LOGGER_PREFIX} generateRandomKey(${length}) called`);
   const keyBytes = crypto.getRandomValues(new Uint8Array(length));
   const keyBase64 = btoa(String.fromCharCode(...keyBytes));
   
@@ -44,6 +45,7 @@ export const generateRandomKey = async (length = 32) => {
  * @returns {Promise<string>} Base64 encoded vault key
  */
 export const deriveVaultKey = async (masterPassword, salt) => {
+  console.log(`${CRYPTO_LOGGER_PREFIX} deriveVaultKey() called - Deriving key from master password`);
   try {
     // Decode salt from base64
     const saltBytes = Uint8Array.from(atob(salt), c => c.charCodeAt(0));
@@ -56,6 +58,8 @@ export const deriveVaultKey = async (masterPassword, salt) => {
       false,
       ['deriveBits', 'deriveKey']
     );
+    
+    console.log(`${CRYPTO_LOGGER_PREFIX} PBKDF2 key material imported, deriving 256-bit key with 600k iterations`);
     
     // Derive 256-bit key using PBKDF2 with 600,000 iterations
     // Set extractable: true so we can export the key for use
@@ -74,27 +78,37 @@ export const deriveVaultKey = async (masterPassword, salt) => {
     
     // Export key as base64
     const exportedKey = await crypto.subtle.exportKey('raw', vaultKey);
-    return btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
+    const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
+    
+    console.log(`${CRYPTO_LOGGER_PREFIX} ✓ Vault key derived: ${keyBase64.length} chars (base64)`);
+    return keyBase64;
   } catch (error) {
-    console.error('Cryptographic operation failed:', error);
+    console.error(`${CRYPTO_LOGGER_PREFIX} ✗ Key derivation failed:`, error);
     throw new Error('Failed to derive vault key: ' + error.message);
   }
 };
 
 /**
- * Encrypt password using AES-256-GCM
+ * Encrypt password using AES-256-GCM (CLASSICAL CRYPTOGRAPHY)
  * 
  * Uses Web Crypto API for proper authenticated encryption with
  * 128-bit authentication tag for integrity verification.
  * 
+ * NOTE: This uses AES-256-GCM which is classical (pre-quantum) cryptography.
+ * For PQC-enhanced encryption, the shared secret from ML-KEM should be used
+ * to derive the AES key instead of the master password directly.
+ * 
  * @param {string} plaintext - Password to encrypt
- * @param {string} vaultKeyBase64 - Base64 encoded vault key
+ * @param {string} vaultKeyBase64 - Base64 encoded vault key (master-password-derived)
  * @returns {Promise<{encryptedPassword: string, iv: string, authTag: string}>}
  */
 export const encryptPassword = async (plaintext, vaultKeyBase64) => {
+  console.log(`${CRYPTO_LOGGER_PREFIX} encryptPassword() called - Using AES-256-GCM (CLASSICAL)`);
+  console.log(`${CRYPTO_LOGGER_PREFIX} ⚠ WARNING: Encryption key derived directly from master password (not PQC)`);
   try {
     // Generate cryptographically random IV (96 bits for GCM)
     const iv = crypto.getRandomValues(new Uint8Array(12));
+    console.log(`${CRYPTO_LOGGER_PREFIX} IV generated: ${iv.length} bytes`);
     
     // Import vault key
     const key = await crypto.subtle.importKey(
@@ -112,13 +126,8 @@ export const encryptPassword = async (plaintext, vaultKeyBase64) => {
       new TextEncoder().encode(plaintext)
     );
     
-    // Web Crypto API returns the full ciphertext including auth tag
-    // The auth tag is internally managed by the Web Crypto API
     const encryptedArray = new Uint8Array(encrypted);
-    
-    // For AES-GCM, the Web Crypto API handles auth tag internally
-    // We only need to return the ciphertext (full encrypted data)
-    // The auth tag will be verified during decryption
+    console.log(`${CRYPTO_LOGGER_PREFIX} ✓ AES-256-GCM encryption complete: ciphertext=${encryptedArray.length} bytes`);
     
     return {
       encryptedPassword: btoa(String.fromCharCode(...encryptedArray)),
@@ -126,7 +135,7 @@ export const encryptPassword = async (plaintext, vaultKeyBase64) => {
       authTag: ''  // Auth tag managed internally by Web Crypto API
     };
   } catch (error) {
-    console.error('Cryptographic operation failed:', error);
+    console.error(`${CRYPTO_LOGGER_PREFIX} ✗ Encryption failed:`, error);
     throw new Error('Failed to encrypt password: ' + error.message);
   }
 };
@@ -149,6 +158,7 @@ export const decryptPassword = async (
   authTagBase64, 
   vaultKeyBase64
 ) => {
+  console.log(`${CRYPTO_LOGGER_PREFIX} decryptPassword() called - Using AES-256-GCM (CLASSICAL)`);
   try {
     // Import vault key
     const key = await crypto.subtle.importKey(
@@ -162,21 +172,16 @@ export const decryptPassword = async (
     // Decode components
     const ciphertext = Uint8Array.from(atob(encryptedPasswordBase64), c => c.charCodeAt(0));
     const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
-    console.log('DecryptDebug - ciphertext length:', ciphertext.length);
-    console.log('DecryptDebug - iv length:', iv.length);
+    console.log(`${CRYPTO_LOGGER_PREFIX} Decrypting: ciphertext=${ciphertext.length}, iv=${iv.length}`);
     
     // Web Crypto API returns ciphertext with auth tag appended (last 16 bytes)
-    // For decryption, we need to split and recombine: ciphertext + auth tag
     const ciphertextBytes = ciphertext.slice(0, -16);
     const authTagBytes = ciphertext.slice(-16);
     
-    console.log('DecryptDebug - extracted ciphertext:', ciphertextBytes.length, 'bytes');
-    console.log('DecryptDebug - extracted authTag:', authTagBytes.length, 'bytes');
+    console.log(`${CRYPTO_LOGGER_PREFIX} Extracted: ciphertext=${ciphertextBytes.length}, authTag=${authTagBytes.length}`);
     
     // Combine ciphertext and auth tag for decryption
     const encryptedData = new Uint8Array([...ciphertextBytes, ...authTagBytes]);
-    
-    console.log('DecryptDebug - combined for decrypt:', encryptedData.length, 'bytes');
     
     // Decrypt and verify auth tag
     const decrypted = await crypto.subtle.decrypt(
@@ -185,9 +190,11 @@ export const decryptPassword = async (
       encryptedData
     );
     
-    return new TextDecoder().decode(decrypted);
+    const plaintext = new TextDecoder().decode(decrypted);
+    console.log(`${CRYPTO_LOGGER_PREFIX} ✓ Decryption successful: result length=${plaintext.length} chars`);
+    return plaintext;
   } catch (error) {
-    console.error('Cryptographic operation failed:', error);
+    console.error(`${CRYPTO_LOGGER_PREFIX} ✗ Decryption failed:`, error);
     throw new Error('Decryption failed - ' + error.message);
   }
 };
@@ -209,6 +216,8 @@ export const generatePassword = (length = 20, options = {}) => {
     includeNumbers = true,
     includeSymbols = true
   } = options;
+  
+  console.log(`${CRYPTO_LOGGER_PREFIX} generatePassword(${length}) called`);
   
   // Build character set
   let charset = '';
@@ -234,24 +243,23 @@ export const generatePassword = (length = 20, options = {}) => {
   for (let i = 0; i < length; i++) {
     let random;
     do {
-      random = randomValues[i] >>> 0; // Ensure unsigned
-    } while (random >= maxValidValue); // Rejection sampling
+      random = randomValues[i] >>> 0;
+    } while (random >= maxValidValue);
     
     password += charset[random % charsetLength];
   }
   
+  console.log(`${CRYPTO_LOGGER_PREFIX} ✓ Password generated: length=${password.length}`);
   return password;
 };
 
 /**
- * Calculate password strength score
- * 
- * Evaluates password against multiple criteria and returns
- * a score from 0-4 with feedback for improvement.
+ * Calculate password strength score and feedback
+ * Used for registration form validation
  * 
  * @param {string} password - Password to evaluate
- * @param {string[]} userInputs - Personal info to avoid (usernames, etc.)
- * @returns {Promise<{score: number, feedback: string[], strength: string}>}
+ * @param {Array} userInputs - Additional user data to check against
+ * @returns {Object} Strength score, feedback array, and label
  */
 export const calculatePasswordStrength = async (password, userInputs = []) => {
   if (!password) {
@@ -319,32 +327,4 @@ export const calculatePasswordStrength = async (password, userInputs = []) => {
     feedback: feedback.length > 0 ? feedback : ['Password meets requirements'],
     strength
   };
-};
-
-/**
- * Verify password can be encrypted/decrypted correctly
- * 
- * @returns {Promise<boolean>}
- */
-export const verifyCryptoImplementation = async () => {
-  try {
-    const testPassword = 'TestPassword123!';
-    const testKey = await generateRandomKey(32);
-    
-    const encrypted = await encryptPassword(testPassword, testKey);
-    const decrypted = await decryptPassword(
-      encrypted.encryptedPassword,
-      encrypted.iv,
-      encrypted.authTag,
-      testKey
-    );
-    
-    // Clear test key from memory
-    secureZeroize(Uint8Array.from(atob(testKey), c => c.charCodeAt(0)));
-    
-    return decrypted === testPassword;
-  } catch (error) {
-    console.error('Cryptographic operation failed');
-    return false;
-  }
 };

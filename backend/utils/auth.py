@@ -4,12 +4,15 @@ Session-based authentication for zero-knowledge architecture
 
 Provides JWT token generation and validation for securing API endpoints.
 """
+import logging
 import jwt
 import secrets
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Dict, Any, Set
 from flask import request, jsonify, current_app
+
+logger = logging.getLogger(__name__)
 
 # Token configuration
 TOKEN_EXPIRY_MINUTES = 15  # Short-lived tokens for security
@@ -138,6 +141,7 @@ def verify_session_token(token: str) -> Dict[str, Any]:
     Raises:
         AuthError: If token is invalid, expired, or blacklisted
     """
+    logger.debug(f"[AUTH] Verifying session token: {token[:20]}...")
     try:
         payload = jwt.decode(
             token,
@@ -147,18 +151,23 @@ def verify_session_token(token: str) -> Dict[str, Any]:
         
         # Verify token type
         if payload.get('type') != 'session':
+            logger.warning(f"[AUTH] Invalid token type: {payload.get('type')}")
             raise AuthError('Invalid token type')
         
         # Check if token is blacklisted
         jti = payload.get('jti')
         if jti and is_blacklisted(jti):
+            logger.warning(f"[AUTH] Token blacklisted: jti={jti[:16]}...")
             raise AuthError('Token has been revoked')
         
+        logger.debug(f"[AUTH] Token verified: user_id={payload.get('user_id')}, exp={payload.get('exp')}")
         return payload
         
     except jwt.ExpiredSignatureError:
+        logger.warning("[AUTH] Token expired")
         raise AuthError('Session expired', 401)
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"[AUTH] Invalid token: {e}")
         raise AuthError('Invalid or expired token', 401)
 
 

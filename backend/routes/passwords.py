@@ -73,8 +73,12 @@ def add_password():
     """
     try:
         data = request.get_json()
+        user_id_str = request.user_id
+        
+        logger.info(f"[PASSWORDS] add_password called by user_id={user_id_str}")
         
         if not data:
+            logger.warning("[PASSWORDS] No data provided in request")
             return jsonify({
                 'success': False,
                 'error': 'No data provided'
@@ -87,9 +91,26 @@ def add_password():
         iv = data.get('iv')
         auth_tag = data.get('authTag')
         
+        # Log encryption details for debugging
+        logger.info(f"[PASSWORDS] Received encryption data:")
+        logger.info(f"  - siteUrl: {site_url}")
+        logger.info(f"  - encryptedPassword present: {'Yes' if encrypted_password else 'No'}")
+        logger.info(f"  - iv present: {'Yes' if iv else 'No'}")
+        logger.info(f"  - auth_tag present: {'Yes' if auth_tag else 'No'}")
+        
+        # Check if PQC fields are present (these would be used if PQC key encapsulation was implemented)
+        pqc_ciphertext = data.get('pqcCiphertext')
+        pqc_public_key = data.get('pqcPublicKey')
+        
+        if pqc_ciphertext:
+            logger.info(f"[PASSWORDS] ═ PQC data detected! PQC ciphertext length={len(pqc_ciphertext)}")
+        else:
+            logger.info(f"[PASSWORDS] ═ No PQC data - using classical AES-256-GCM only")
+        
         # Validation - check for None/empty strings, not falsy values
         # auth_tag can be empty string (Web Crypto API handles auth tag internally)
         if site_url is None or site_username is None or encrypted_password is None or iv is None:
+            logger.warning("[PASSWORDS] Missing required fields")
             return jsonify({
                 'success': False,
                 'error': 'Missing required fields'
@@ -141,9 +162,11 @@ def add_password():
             existing_password.iv = iv
             existing_password.auth_tag = auth_tag
             
+            logger.info(f"[PASSWORDS] Updating existing password for user {user_id_str}: {site_url}")
+            
             db.session.commit()
             
-            logger.info(f"Password updated for user {user_id_str}: {site_url}")
+            logger.info(f"[PASSWORDS] ✓ Password updated successfully for {site_url}")
             
             return jsonify({
                 'success': True,
@@ -152,6 +175,7 @@ def add_password():
             }), 200
         
         # Create new password entry
+        logger.info(f"[PASSWORDS] Creating new password entry for user {user_id_str}: {site_url}")
         new_password = Password(
             password_id=str(uuid.uuid4()),
             user_id=user.user_id,
@@ -165,7 +189,7 @@ def add_password():
         db.session.add(new_password)
         db.session.commit()
         
-        logger.info(f"Password added for user {user_id_str}: {site_url}")
+        logger.info(f"[PASSWORDS] ✓ New password saved successfully: id={new_password.password_id}, site={site_url}")
         
         return jsonify({
             'success': True,
