@@ -260,11 +260,25 @@ export const authAPI = {
    * @param {string} username - Username
    * @returns {Promise<object>} Salt data
    */
-  getSalt: async (username) => {
-    const response = await api.post('/auth/get-salt', { username });
-    return response.data;
-  }
-};
+   getSalt: async (username) => {
+     const response = await api.post('/auth/get-salt', { username });
+     return response.data;
+   },
+
+   /**
+    * Confirm PQC session with client's public key
+    * @param {string} sessionId - Session ID
+    * @param {object} clientKeyData - Client public key data
+    * @returns {Promise<object>} Confirmation response
+    */
+   confirmPQCSession: async (sessionId, clientKeyData) => {
+     const response = await api.post('/auth/pqc/confirm', {
+       session_id: sessionId,
+       client_public_key: clientKeyData.client_public_key
+     });
+     return response.data;
+   }
+ };
 
 // ============================================
 // Password Management APIs

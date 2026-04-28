@@ -390,8 +390,6 @@ def get_crypto_view():
             'username': user.username,
             'userId': str(user.user_id),
             'salt': user.salt,
-            'spake2Verifier': user.spake2_verifier[:50] + '...' if user.spake2_verifier else None,
-            'spake2Salt': user.spake2_salt[:50] + '...' if user.spake2_salt else None,
             'passwords': encrypted_data,
             'total_entries': len(encrypted_data)
         }), 200

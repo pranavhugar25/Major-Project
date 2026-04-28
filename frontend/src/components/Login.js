@@ -101,14 +101,23 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
           // Step 1b: Verify server's ML-DSA-87 signature on session_id
           if (session.server_signing_key && session.session_signature) {
             console.log('[Login] Verifying server ML-DSA-87 signature...');
-            const ml_dsa = getMLDSA();
             
             // Decode base64 signature and session_id
             const sessionIdBytes = new TextEncoder().encode(session.session_id);
             const signatureBytes = Uint8Array.from(atob(session.session_signature), c => c.charCodeAt(0));
             const serverSigningKey = Uint8Array.from(atob(session.server_signing_key), c => c.charCodeAt(0));
             
-            const isValid = await ml_dsa.verify(
+            // Debug logging
+            console.log('[Login] Debug lengths:', {
+              session_id: session.session_id,
+              sessionIdBytes: sessionIdBytes.length,
+              signatureBytes: signatureBytes.length,
+              serverSigningKey: serverSigningKey.length,
+              expected_sig_len: ~4627,
+              expected_pubkey_len: 2592
+            });
+            
+            const isValid = await verify(
               signatureBytes,
               sessionIdBytes,
               serverSigningKey
@@ -127,14 +136,16 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
           console.log('[Login] Generating ML-KEM-1024 keypair...');
           const clientKeypair = await generateKeypair();
 
-          // Step 3: Encapsulate shared secret using SERVER's public key
-          console.log('[Login] Encapsulating shared secret with server public key...');
-          const encapsulation = await encapsulate(session.server_public_key);
+           // Step 3: Encapsulate shared secret using SERVER's public key
+           console.log('[Login] Encapsulating shared secret with server public key...');
+           const serverPublicKeyUint8 = Uint8Array.from(atob(session.server_public_key), c => c.charCodeAt(0));
+           const encapsulation = await encapsulate(serverPublicKeyUint8);
 
-          // Step 4: The shared secret IS the vault key (PQC-derived)
-          const vaultKey = encapsulation.sharedSecret;
-          console.log('[Login] ✓ Vault key derived from ML-KEM-1024 shared secret');
-          console.log('[Login] Vault key (first 40 chars):', vaultKey.substring(0, 40) + '...');
+           // Step 4: The shared secret IS the vault key (PQC-derived)
+           const vaultKeyUint8 = encapsulation.sharedSecret;
+           const vaultKey = btoa(String.fromCharCode(...vaultKeyUint8));
+           console.log('[Login] ✓ Vault key derived from ML-KEM-1024 shared secret');
+           console.log('[Login] Vault key (first 40 chars):', vaultKey.substring(0, 40) + '...');
 
           // Step 5: Send client's public key to server for confirmation
           console.log('[Login] Sending client public key to server...');

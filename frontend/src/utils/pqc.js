@@ -146,7 +146,8 @@ export async function verify(signature, message, publicKey) {
   console.log(`${PQC_LOGGER_PREFIX} verify() called`);
   const ml_dsa = getMLDSA();
   try {
-    const result = ml_dsa.verify(signature, message, publicKey);
+    // noble-post-quantum expects (publicKey, message, signature)
+    const result = ml_dsa.verify(publicKey, message, signature);
     console.log(`${PQC_LOGGER_PREFIX} Verification result: ${result ? 'VALID' : 'INVALID'}`);
     return result;
   } catch (error) {
@@ -187,8 +188,9 @@ export async function initPQC() {
   
   if (available) {
     try {
-      const ml_kem = getMLKEM();
-      const ml_dsa = getMLDSA();
+      // Load algorithms to ensure they're ready (side effects only)
+      getMLKEM();
+      getMLDSA();
       
       console.log(`${PQC_LOGGER_PREFIX} ✓ Initialization successful`);
       console.log(`${PQC_LOGGER_PREFIX} ✓ Using ML-KEM-1024 (NIST Level 5)`);

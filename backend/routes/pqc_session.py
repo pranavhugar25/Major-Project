@@ -280,6 +280,10 @@ def init_session():
         
         logger.info(f"[PQC_SESSION] ✓ Session created: id={session.session_id[:32]}...")
         logger.info(f"[PQC_SESSION] ✓ Session signed with ML-DSA-87")
+        logger.info(f"[PQC_SESSION] Debug info:")
+        logger.info(f"  - server_signing_key length: {len(server_signing_key) if server_signing_key else 'None'} chars (base64)")
+        logger.info(f"  - session_signature length: {len(session_signature)} chars (base64)")
+        logger.info(f"  - session_signature (first 50): {session_signature[:50] if session_signature else 'None'}")
         
         return jsonify({
             'success': True,

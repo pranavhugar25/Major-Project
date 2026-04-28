@@ -118,28 +118,36 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
           const session = await initSession(username, response.userId);
           console.log('[Register] Session received:', session.session_id.substring(0, 16) + '...');
 
-          // Verify server ML-DSA-87 signature (optional but recommended)
-          if (session.server_signing_key && session.session_signature) {
-            console.log('[Register] Verifying server ML-DSA-87 signature...');
-            const sessionIdBytes = new TextEncoder().encode(session.session_id);
-            const signatureBytes = Uint8Array.from(atob(session.session_signature), c => c.charCodeAt(0));
-            const serverSigningKey = Uint8Array.from(atob(session.server_signing_key), c => c.charCodeAt(0));
+            // Verify server ML-DSA-87 signature (optional but recommended)
+            if (session.server_signing_key && session.session_signature) {
+              console.log('[Register] Verifying server ML-DSA-87 signature...');
+              
+              // Decode base64 signature and session_id
+              const sessionIdBytes = new TextEncoder().encode(session.session_id);
+              const signatureBytes = Uint8Array.from(atob(session.session_signature), c => c.charCodeAt(0));
+              const serverSigningKey = Uint8Array.from(atob(session.server_signing_key), c => c.charCodeAt(0));
 
-            const isValid = await verify(signatureBytes, sessionIdBytes, serverSigningKey);
-            if (isValid) {
-              console.log('[Register] ✓ Server signature verified (ML-DSA-87)');
+              const isValid = await verify(
+                signatureBytes,
+                sessionIdBytes,
+                serverSigningKey
+              );
+              if (isValid) {
+                console.log('[Register] ✓ Server signature verified (ML-DSA-87)');
+              } else {
+                throw new Error('ML-DSA-87 signature verification failed');
+              }
             } else {
-              throw new Error('ML-DSA-87 signature verification failed');
+              console.warn('[Register] No server signature - skipping verification');
             }
-          } else {
-            console.warn('[Register] No server signature - skipping verification');
-          }
 
-          // Perform key encapsulation
-          console.log('[Register] Encapsulating shared secret...');
-          const encapsulation = encapsulate(session.server_public_key);
-          const vaultKey = encapsulation.sharedSecret;
-          console.log('[Register] ✓ Vault key derived using ML-KEM-1024');
+           // Perform key encapsulation
+           console.log('[Register] Encapsulating shared secret...');
+           const serverPublicKeyUint8 = Uint8Array.from(atob(session.server_public_key), c => c.charCodeAt(0));
+           const encapsulation = await encapsulate(serverPublicKeyUint8);
+           const vaultKeyUint8 = encapsulation.sharedSecret;
+           const vaultKey = btoa(String.fromCharCode(...vaultKeyUint8));
+           console.log('[Register] ✓ Vault key derived using ML-KEM-1024');
 
           // Send client public key to server
           console.log('[Register] Sending client public key to server...');

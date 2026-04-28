@@ -82,15 +82,10 @@ function CryptoView({ user }) {
                 <label>User ID</label>
                 <code>{cryptoData.userId}</code>
               </div>
-              <div className="data-item">
-                <label>Salt (for PBKDF2)</label>
-                <code className="truncated">{cryptoData.salt}</code>
-              </div>
-              <div className="data-item">
-                <label>SPAKE2 Verifier</label>
-                <code className="truncated">{cryptoData.spake2Verifier || 'Not available'}</code>
-                <small>SPAKE2 PAKE verifier for quantum-resistant password authentication</small>
-              </div>
+               <div className="data-item">
+                 <label>Salt (for Argon2id)</label>
+                 <code className="truncated">{cryptoData.salt}</code>
+               </div>
             </div>
           </div>
 
@@ -148,11 +143,11 @@ function CryptoView({ user }) {
           <div className="crypto-section">
             <h2>Security Architecture</h2>
             <div className="architecture-grid">
-              <div className="arch-card">
-                <span className="arch-icon">🔑</span>
-                <h3>Key Derivation</h3>
-                <p>PBKDF2 with 600,000 iterations generates your vault key from master password + salt</p>
-              </div>
+               <div className="arch-card">
+                 <span className="arch-icon">🔑</span>
+                 <h3>Key Derivation</h3>
+                 <p>Argon2id generates your vault key from master password + salt</p>
+               </div>
               
               <div className="arch-card">
                 <span className="arch-icon">🔐</span>

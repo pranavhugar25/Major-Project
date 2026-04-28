@@ -103,7 +103,21 @@ def sign_session_data(data: str) -> str:
     """Sign data using server's ML-DSA-87 private key"""
     if not _server_mldsa_private_key:
         raise PQCError("Server signing key not initialized")
-    return MLDSA87.sign(data, _server_mldsa_private_key, _server_mldsa_public_key)
+    
+    try:
+        # Sign the session_id string
+        message_bytes = data.encode('utf-8')
+        logger.info(f"[PQC] Signing message: len={len(message_bytes)} bytes")
+        
+        signature = MLDSA87.sign(data, _server_mldsa_private_key, _server_mldsa_public_key)
+        
+        logger.info(f"[PQC] Signature generated: len={len(signature)} chars (base64)")
+        logger.info(f"[PQC] Signature (first 50 chars): {signature[:50]}")
+        
+        return signature
+    except Exception as e:
+        logger.error(f"[PQC] Signing failed: {e}")
+        raise PQCError(f"Signing failed: {e}")
 
 def verify_session_signature(data: str, signature: str, public_key: str) -> bool:
     """Verify ML-DSA-87 signature"""
@@ -336,10 +350,16 @@ class MLDSA87:
             signature = base64.b64decode(signature_b64)
             public_key = base64.b64decode(public_key_b64)
             
+            logger.info(f"[PQC] Verify: msg_len={len(message_bytes)}, sig_len={len(signature)}, pub_len={len(public_key)}")
+            
             with Signature(MLDSA87.ALGORITHM) as sig:
-                return sig.verify(message_bytes, signature, public_key)
+                result = sig.verify(message_bytes, signature, public_key)
+                logger.info(f"[PQC] Verify result: {result}")
+                return result
         except Exception as e:
             logger.warning(f"ML-DSA-87 verification failed: {e}")
+            import traceback
+            logger.warning(f"Traceback: {traceback.format_exc()}")
             return False
 
 

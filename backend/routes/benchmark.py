@@ -196,7 +196,8 @@ def _run_pqc_benchmark(iterations=10):
     ciphertext = None
     for _ in range(iterations):
         public_key, _ = PQCKeyManager.generate_kyber_keypair()
-        (ciphertext, _), wall_ms, cpu_ms = _time_call(PQCKeyManager.encapsulate, public_key)
+        kem_result, wall_ms, cpu_ms = _time_call(PQCKeyManager.encapsulate, public_key)
+        ciphertext = kem_result.ciphertext
         encaps_times.append(wall_ms)
         encaps_cpu.append(cpu_ms)
 
@@ -205,7 +206,8 @@ def _run_pqc_benchmark(iterations=10):
     decap_cpu = []
     for _ in range(iterations):
         public_key, private_key = PQCKeyManager.generate_kyber_keypair()
-        ciphertext, _ = PQCKeyManager.encapsulate(public_key)
+        kem_result = PQCKeyManager.encapsulate(public_key)
+        ciphertext = kem_result.ciphertext
         _, wall_ms, cpu_ms = _time_call(PQCKeyManager.decapsulate, ciphertext, private_key)
         decap_times.append(wall_ms)
         decap_cpu.append(cpu_ms)
