@@ -163,14 +163,6 @@ This is a demonstration project. For production use:
 - Implement account recovery
 - Add audit logging
 
-## 📄 License
-
-MIT License - See LICENSE file for details
-
-## 🤝 Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md first.
-
 ## 📧 Contact
 
 For questions or issues, please open a GitHub issue.
